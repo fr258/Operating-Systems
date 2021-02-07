@@ -1,11 +1,11 @@
-/* syscall.c
+/* threads.c
  *
  * Group Members Names and NetIDs:
  *   1. Matthew Notaro (myn7)
  *   2. Farrah Rahman (fr258)
  *
  * ILab Machine Tested on:
- *   kill.cs.rutgers.edu
+ *   atlas.cs.rutgers.edu
  */
 
 #include <stdio.h>
@@ -27,6 +27,7 @@ int loop = 10;
  */
 void *inc_shared_counter(void *arg) {
 
+
     int i;
 
     printf("Thread Running\n");
@@ -36,9 +37,16 @@ void *inc_shared_counter(void *arg) {
         /* Part 2: Modify the code within this for loop to
                    allow for synchonized incrementing of x
                    between the two threads */
-        x = x + 1;
+				   pthread_mutex_t *lock = (pthread_mutex_t*)arg;
+				   pthread_mutex_lock(lock);
+				    x = x + 1;
+					printf("x is incremented to %d\n", x);
+					pthread_mutex_unlock(lock);
+
 
     }
+	
+	
 
     return NULL;
 }
@@ -59,14 +67,31 @@ int main(int argc, char *argv[]) {
 
     loop = atoi(argv[1]) / 2;
 
-    printf("Going to run two threads to increment x up to %d\n", loop);
-
     // Part 1: create two threads and have them
     // run the inc_shared_counter function()
     /* Implement Code Here */
 
+	pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	pthread_t thread1, thread2;
+	
+	pthread_create(&thread1, NULL, inc_shared_counter, &lock);
+	pthread_create(&thread2, NULL, inc_shared_counter, &lock);
+
+	pthread_join(thread1, NULL);
+	pthread_join(thread2, NULL);
 
     printf("The final value of x is %d\n", x);
 
     return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
