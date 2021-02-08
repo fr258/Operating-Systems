@@ -18,7 +18,12 @@ double avg_time = 0;
 int main(int argc, char *argv[]) {
 
     /* Implement Code Here */
+    float avg_time = 0;
+    int i;
+    for(i = 0; i < 1000; i++){
 
+        avg_time += 0;
+    }
     // Remember to place your final calculated average time
     // per system call into the avg_time variable
 
