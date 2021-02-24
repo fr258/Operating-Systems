@@ -1,8 +1,14 @@
 // File:	rpthread_t.h
 
-// List all group member's name:
-// username of iLab:
-// iLab Server:
+/* 
+ * Group Members Names and NetIDs:
+ *   1. Matthew Notaro (myn7)
+ *   2. Farrah Rahman (fr258)
+ *
+ * ILab Machine Tested on:
+ *   kill.cs.rutgers.edu
+ */
+
 
 #ifndef RTHREAD_T_H
 #define RTHREAD_T_H

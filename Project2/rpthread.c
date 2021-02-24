@@ -1,8 +1,13 @@
 // File:	rpthread.c
 
-// List all group member's name:
-// username of iLab:
-// iLab Server:
+/* 
+ * Group Members Names and NetIDs:
+ *   1. Matthew Notaro (myn7)
+ *   2. Farrah Rahman (fr258)
+ *
+ * ILab Machine Tested on:
+ *   kill.cs.rutgers.edu
+ */
 
 #include "rpthread.h"
 
@@ -91,7 +96,7 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 
 /* scheduler */
 static void schedule() {
-	// Every time when timer interrup happens, your thread library 
+	// Every time when timer interrupt happens, your thread library 
 	// should be contexted switched from thread context to this 
 	// schedule function
 
