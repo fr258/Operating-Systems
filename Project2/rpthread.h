@@ -24,54 +24,83 @@
 #define TIMESLICE 5
 #endif
 
-#define RUNNING 0
-#define READY 1
-#define BLOCKED 2
-#define TERMINATED 3
+#define STACKSIZE 16834
+
+//remove later!
+//#define SCHED RR
 
 /* include lib header files that you need here: */
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/time.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <ucontext.h>
+#include <string.h>
 
 typedef uint rpthread_t;
 typedef enum status = {RUNNING, READY, BLOCKED, TERMINATED};
 
+typedef enum {RUNNING, READY, BLOCKED, TERMINATED} status;
+
+
 typedef struct threadControlBlock {
-	rpthread_t tid;
-    status state;
-    ucontext_t context;
+	/* add important states in a thread control block */
+	
+	rpthread_t threadId;
+	ucontext_t context;
+	status state;
+	void*(*function)(void*);
+	void* input;
+	void* retVal;
 	int priority;
 } tcb;
 
 /* mutex struct definition */
 typedef struct rpthread_mutex_t {
-	/* add something here */
-
-	// YOUR CODE HERE
+	int* lock;
 } rpthread_mutex_t;
 
-/* define your data structures here: */
-// Feel free to add your own auxiliary data structures (linked list or queue etc...)
 
-
-
- typedef struct MLqueue {
+typedef struct MLqueue {
     node* head;
     node* tail;
-}
+};
 
 // YOUR CODE HERE
+
+typedef struct Node {
+	tcb* tcblock;
+	struct Node* prev;
+	struct Node* next;
+    int priority;
+} node;
+
+typedef struct Queue {
+	node* head;
+	node* tail;
+    struct Queue* next;
+    int priority;
+} queue;
+
+typedef struct LinkedList {
+	node* head;
+} llist;
+
+
+
+
+
+
 
 
 /* Function Declarations: */
 
 /* create a new thread */
-int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void
-    *(*function)(void*), void * arg);
+int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void*(*function)(void*), void * arg);
 
 /* give CPU pocession to other user level threads voluntarily */
 int rpthread_yield();
@@ -95,12 +124,15 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex);
 /* destroy the mutex */
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex);
 
+static void schedule();
+
 #ifdef USE_RTHREAD
 #define pthread_t rpthread_t
 #define pthread_mutex_t rpthread_mutex_t
 #define pthread_create rpthread_create
 #define pthread_exit rpthread_exit
 #define pthread_join rpthread_join
+#define pthread_yield rpthread_ield
 #define pthread_mutex_init rpthread_mutex_init
 #define pthread_mutex_lock rpthread_mutex_lock
 #define pthread_mutex_unlock rpthread_mutex_unlock
