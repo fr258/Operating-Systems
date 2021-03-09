@@ -29,14 +29,15 @@ static void sched_mlfq();
 //GLOBALS
 //***************************************************
 ucontext_t *schedCon = NULL, *mainCon = NULL;
-queue RRqueue = {NULL, NULL};
-queue MLqueue = {NULL, NULL};
+queue RRqueue = {NULL, NULL, NULL, 0};
+queue MLqueue = {NULL, NULL, NULL, 0};
 queue blockList = {NULL, NULL}; //not in use
 llist threadMap[97] = {NULL}; //not in use, but should be because who knows where terminated threads are going at present
 tcb* TCBcurrent;
 struct itimerval timer, zeroTimer;
 struct sigaction sa;
 int tempIds[20] = {0}; //remove later!
+int scheduler; //0 if RR, 1 if MLFQ
 //***************************************************
 
 int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function)(void*), void * arg) {
@@ -72,8 +73,6 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 	setitimer(ITIMER_REAL, &timer, NULL);
 	
 	//printf("end create\n");
-
-	
 	return 0;
 }
 
@@ -82,9 +81,6 @@ int rpthread_yield() {
 	/// change thread state from Running to Ready
 	// save context of this thread to its thread control block
 	// switch from thread context to scheduler context
-
-	
-	
 	return 0;
 };
 
@@ -100,12 +96,14 @@ void rpthread_exit(void *value_ptr) {
 	// Handles context switching back to the current thread's uc_link
 	ucontext_t currContext = TCBcurrent->context;
 	ucontext_t* link = currContext.uc_link;
-	
-	if (swapcontext(&uctx_main, &uctx_func2) == -1)
-		handle_error("swapcontext");
+
 
 	// Frees current thread's TCB struct
 	free(TCBcurrent);
+
+
+
+
 
 	// Return 1 on success
 	if(value_ptr != NULL)
@@ -114,6 +112,7 @@ void rpthread_exit(void *value_ptr) {
 
 
 /* Wait for thread termination */
+// Returns int value of 0 on success, -1 if thread not found
 int rpthread_join(rpthread_t thread, void **value_ptr) {
 	// wait for a specific thread to terminate
 	// de-allocate any dynamic memory created by the joining thread
@@ -127,23 +126,49 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 
 	// Find thread's tcb from the tid
 	// Linearly search thru linked list of all created threads
-	tcbList* threadListPtr = list;
-	tcb* temp;
-	while(threadListPtr != NULL){
-		if(threadListPtr->currTCB->tid == thread){
-			temp = currTCB;
+	// Can also just search thru all threads in scheduler - don't have to wait for a thread that's not running
+	// Assume 2d linked list scheduler since join has to work for both RR and MLFQ.
+
+	// Which queue to use - probably unnecessary if we decide to only use 1 queue for both RR And ML
+	queue level = (scheduler) ? MLqueue : RRqueue;
+	node* temp;
+	int found = 1;
+
+	// For each level in the queue, go thru each thread on that level
+	while(level != NULL && found){
+		// For each thread on current level
+		temp = level.head;
+		while(temp != NULL){
+			// Found thread with desired tid
+			if((temp->element != NULL) && (temp->tcblock->threadId == thread)){
+				// Use found to break out of outer while loop
+				found = 0;
+				break;
+			}
+			temp = temp->next;
 		}
+		level = level.next;
 	}
 
+	// Fail to find a thread with the desired tid.
+	if(temp == NULL){
+		if(value_ptr != NULL)
+			**value_ptr = 0;
+		return -1;
+	}
+
+	// If tid found, loop until desired thread is terminated, at which point we are free to return
 	while(1){
 		if(temp->state == TERMINATED){
 			break;
 		}
-		rpthread_yield();
 	}
-	// think this works as a simplified version of the above but not as clear
+	// think this works as a simplified version of the above but not as readable
 	// while(thread->status != TERMINATED)
 
+	// Set to 1 on success
+	if(value_ptr != NULL)
+		**value_ptr = 1;
 	return 0;
 };
 
@@ -160,20 +185,20 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex,
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
-        // use the built-in test-and-set atomic function to test the mutex
-        // if the mutex is acquired successfully, enter the critical section
-        // if acquisigHandler mutex fails, push current thread into block list and //  
-        // context switch to the scheduler thread
-		
-      /*  // YOUR CODE HERE
-		if(__sync_lock_test_and_set(mutex->lock, 1)==1) { //lock not acquired
-			TCBcurrent.state = BLOCKED;
-			//add(mutex->list, TCBcurrent);
-			swapcontext(TCBcurrent.context, &schedCon);
-		}
-		*/
-		
-        return 0;
+	// use the built-in test-and-set atomic function to test the mutex
+	// if the mutex is acquired successfully, enter the critical section
+	// if acquisigHandler mutex fails, push current thread into block list and //  
+	// context switch to the scheduler thread
+	
+	/*  // YOUR CODE HERE
+	if(__sync_lock_test_and_set(mutex->lock, 1)==1) { //lock not acquired
+		TCBcurrent.state = BLOCKED;
+		//add(mutex->list, TCBcurrent);
+		swapcontext(TCBcurrent.context, &schedCon);
+	}
+	*/
+	
+	return 0;
 };
 
 
@@ -183,7 +208,6 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
 
-	// YOUR CODE HERE
 	__sync_lock_test_and_set(mutex->lock, 0); //release lock
 	
 	return 0;
@@ -191,9 +215,8 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 
 
 /* destroy the mutex */
+// Deallocate dynamic memory created in rpthread_mutex_init
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
-	// Deallocate dynamic memory created in rpthread_mutex_init
-
 	return 0;
 };
 
@@ -215,16 +238,16 @@ static void schedule() {
 	// YOUR CODE HERE
 	//printf("in schedule\n");
 
-// schedule policy
-#ifndef MLFQ
-	//printf("round robin in schedule\n");
-	sched_rr();
-	//TCBcurrent = dequeue(RRqueue
-#else 
-	// Choose MLFQ
-     // CODE 2
-#endif
-	//printf("in schedule\n");
+	// schedule policy
+	#ifndef MLFQ
+		//printf("round robin in schedule\n");
+		sched_rr();
+		//TCBcurrent = dequeue(RRqueue
+	#else 
+		// Choose MLFQ
+		// CODE 2
+	#endif
+		//printf("in schedule\n");
 
 }
 
@@ -257,11 +280,16 @@ static void sched_rr() {
 }
 
 /* Preemptive MLFQ scheduling algorithm */
-static void sched_mlfq() {
-	// Your own implementation of MLFQ
-	// (feel free to modify arguments and return types)
+// 4 level
+// stuff that changes going from RR to ML:
+// 		upon using the whole time slice without yielding, enqueue on level priority-1 - happens in signal handler
 
-	// YOUR CODE HERE
+// stuff that doesn't have to:
+// 		dequeueing from highest priority level - keep checking each level's queue until find non-empty queue
+// 		searching for a specific thread id - same as above
+static void sched_mlfq() {
+
+	return;
 }
 
 // Feel free to add any other functions you need
@@ -384,7 +412,6 @@ int init() {
 	getcontext(mainCon);
 	TCBcurrent->context = *mainCon;
 
-	
 	//create scheduling context
 	schedCon = malloc(sizeof(ucontext_t));
 	getcontext(schedCon);
@@ -394,12 +421,15 @@ int init() {
 	makecontext(schedCon, schedule, 0);
 	setitimer(ITIMER_REAL, &timer, NULL);
 	
-
-	
 	return 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
+	//0 if RR, 1 if MLFQ
+	// assuming: gcc -pthread -g -c rpthread.c -DTIMESLICE=$(TSLICE)		for RR
+	//			 gcc -pthread -g -c rpthread.c -DMLFQ -DTIMESLICE=$(TSLICE)	for MLFQ
+	scheduler = (argc == 6) ? 0 : 1;
+
 	rpthread_t thread1 = 0,	thread2 =0, thread3 =0, thread4=0, thread5=0;
 	int a = 3;
 	int b = 5;

@@ -24,17 +24,10 @@
 #define TIMESLICE 5
 #endif
 
-<<<<<<< HEAD
 #define STACKSIZE 16834
 
 //remove later!
 //#define SCHED RR
-=======
-#define RUNNING 0
-#define READY 1
-#define BLOCKED 2
-#define TERMINATED 3
->>>>>>> main
 
 /* include lib header files that you need here: */
 #include <unistd.h>
@@ -56,12 +49,6 @@ typedef enum {RUNNING, READY, BLOCKED, TERMINATED} status;
 
 typedef struct threadControlBlock {
 	/* add important states in a thread control block */
-	// thread Id //id
-	// thread status //running, ready, blocked, etc
-	// thread context //make context
-	// thread stack //malloc
-	// thread priority 
-	// And more ...
 	
 	rpthread_t threadId;
 	ucontext_t context;
@@ -74,33 +61,29 @@ typedef struct threadControlBlock {
 
 /* mutex struct definition */
 typedef struct rpthread_mutex_t {
-	/* add something here */
 	int* lock;
-	
-	// YOUR CODE HERE
 } rpthread_mutex_t;
 
-/* define your data structures here: */
-// Feel free to add your own auxiliary data structures (linked list or queue etc...)
 
-
-
- typedef struct MLqueue {
+typedef struct MLqueue {
     node* head;
     node* tail;
-}
+};
 
 // YOUR CODE HERE
 
 typedef struct Node {
-	void* element;
+	tcb* tcblock;
 	struct Node* prev;
 	struct Node* next;
+    int priority;
 } node;
 
 typedef struct Queue {
 	node* head;
 	node* tail;
+    struct Queue* next;
+    int priority;
 } queue;
 
 typedef struct LinkedList {
