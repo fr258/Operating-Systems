@@ -379,14 +379,12 @@ void sigHandler(int signum) {
 	swapcontext(&TCBcurrent->context, schedCon);
 }
 
-
-
-
 int init() {
 	//printf("init\n");
 	//register signal handler
 	TCBcurrent = malloc(sizeof(tcb));
 	TCBcurrent->threadId = 0;
+	TCBcurrent->state = READY;
 	memset (&sa, 0, sizeof(sigaction));
 	sa.sa_handler = &sigHandler;
 	sigaction (SIGALRM, &sa, NULL);
@@ -407,6 +405,7 @@ int init() {
 	getcontext(mainCon);
 	TCBcurrent->context = *mainCon;
 
+	
 	//create scheduling context
 	schedCon = malloc(sizeof(ucontext_t));
 	getcontext(schedCon);
@@ -416,8 +415,11 @@ int init() {
 	makecontext(schedCon, schedule, 0);
 	setitimer(ITIMER_REAL, &timer, NULL);
 	
+
+	
 	return 0;
 }
+
 
 int main(int argc, char** argv) {
 	//0 if RR, 1 if MLFQ
