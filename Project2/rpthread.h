@@ -24,10 +24,17 @@
 #define TIMESLICE 5
 #endif
 
+<<<<<<< HEAD
 #define STACKSIZE 16834
 
 //remove later!
 //#define SCHED RR
+=======
+#define RUNNING 0
+#define READY 1
+#define BLOCKED 2
+#define TERMINATED 3
+>>>>>>> main
 
 /* include lib header files that you need here: */
 #include <unistd.h>
@@ -42,6 +49,7 @@
 #include <string.h>
 
 typedef uint rpthread_t;
+typedef enum status = {RUNNING, READY, BLOCKED, TERMINATED};
 
 typedef enum {RUNNING, READY, BLOCKED, TERMINATED} status;
 
@@ -61,8 +69,8 @@ typedef struct threadControlBlock {
 	void*(*function)(void*);
 	void* input;
 	void* retVal;
-	// YOUR CODE HERE
-} tcb; 
+	int priority;
+} tcb;
 
 /* mutex struct definition */
 typedef struct rpthread_mutex_t {
@@ -74,6 +82,13 @@ typedef struct rpthread_mutex_t {
 
 /* define your data structures here: */
 // Feel free to add your own auxiliary data structures (linked list or queue etc...)
+
+
+
+ typedef struct MLqueue {
+    node* head;
+    node* tail;
+}
 
 // YOUR CODE HERE
 
