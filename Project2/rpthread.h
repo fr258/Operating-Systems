@@ -42,14 +42,10 @@
 #include <string.h>
 
 typedef uint rpthread_t;
-typedef enum status = {RUNNING, READY, BLOCKED, TERMINATED};
-
 typedef enum {RUNNING, READY, BLOCKED, TERMINATED} status;
 
-
+// TCB Struct
 typedef struct threadControlBlock {
-	/* add important states in a thread control block */
-	
 	rpthread_t threadId;
 	ucontext_t context;
 	status state;
@@ -64,14 +60,7 @@ typedef struct rpthread_mutex_t {
 	int* lock;
 } rpthread_mutex_t;
 
-
-typedef struct MLqueue {
-    node* head;
-    node* tail;
-};
-
-// YOUR CODE HERE
-
+// TCB and extra fields to make linked lists
 typedef struct Node {
 	tcb* tcblock;
 	struct Node* prev;
@@ -79,6 +68,7 @@ typedef struct Node {
     int priority;
 } node;
 
+// Queue node able to make a LL of queues for MLFQ
 typedef struct Queue {
 	node* head;
 	node* tail;

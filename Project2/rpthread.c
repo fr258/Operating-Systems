@@ -91,19 +91,14 @@ void rpthread_exit(void *value_ptr) {
 	// This rpthread_exit function is an explicit call to the rpthread_exit library to end the pthread that called it.
 	// If the value_ptr isn’t NULL, any return value from the thread will be saved. Think about what things you
 	// should clean up or change in the thread state and scheduler state when a thread is exiting.
-	tcb* TCBcurrent = malloc(sizeof(tcb));
-
-	// Handles context switching back to the current thread's uc_link
-	ucontext_t currContext = TCBcurrent->context;
-	ucontext_t* link = currContext.uc_link;
-
 
 	// Frees current thread's TCB struct
+	free(TCBcurrent->context.uc_stack.ss_sp);
+	free(TCBcurrent->context);
 	free(TCBcurrent);
-
-
-
-
+	//TODO: free(node); must free node, not just the TCBcurrent since node is also dynamically allocated
+	
+	// Don't have to disconnect from DLL since already dequeued - not sure what else to do here
 
 	// Return 1 on success
 	if(value_ptr != NULL)
@@ -159,12 +154,12 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 
 	// If tid found, loop until desired thread is terminated, at which point we are free to return
 	while(1){
-		if(temp->state == TERMINATED){
+		if(temp == NULL || temp->state == TERMINATED){
 			break;
 		}
 	}
 	// think this works as a simplified version of the above but not as readable
-	// while(thread->status != TERMINATED)
+	// while(temp != NULL && thread->status != TERMINATED)
 
 	// Set to 1 on success
 	if(value_ptr != NULL)
