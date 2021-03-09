@@ -24,9 +24,10 @@
 #define TIMESLICE 5
 #endif
 
-#define READY 0
-#define SCHEDULED 1
+#define RUNNING 0
+#define READY 1
 #define BLOCKED 2
+#define TERMINATED 3
 
 /* include lib header files that you need here: */
 #include <unistd.h>
@@ -34,20 +35,17 @@
 #include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ucontext.h>
 
 typedef uint rpthread_t;
+typedef enum status = {RUNNING, READY, BLOCKED, TERMINATED};
 
 typedef struct threadControlBlock {
-	/* add important states in a thread control block */
-	// thread Id
-	// thread status
-	// thread context
-	// thread stack
-	// thread priority
-	// And more ...
-
-	// YOUR CODE HERE
-} tcb; 
+	rpthread_t tid;
+    status state;
+    ucontext_t context;
+	int priority;
+} tcb;
 
 /* mutex struct definition */
 typedef struct rpthread_mutex_t {
@@ -58,6 +56,13 @@ typedef struct rpthread_mutex_t {
 
 /* define your data structures here: */
 // Feel free to add your own auxiliary data structures (linked list or queue etc...)
+
+
+
+ typedef struct MLqueue {
+    node* head;
+    node* tail;
+}
 
 // YOUR CODE HERE
 

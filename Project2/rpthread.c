@@ -11,7 +11,8 @@
 
 #include "rpthread.h"
 
-// INITAILIZE ALL YOUR VARIABLES HERE
+
+// INITIALIZE ALL YOUR VARIABLES HERE
 // YOUR CODE HERE
 
 
@@ -41,18 +42,56 @@ int rpthread_yield() {
 /* terminate a thread */
 void rpthread_exit(void *value_ptr) {
 	// Deallocated any dynamic memory created when starting this thread
+	// This rpthread_exit function is an explicit call to the rpthread_exit library to end the pthread that called it.
+	// If the value_ptr isn’t NULL, any return value from the thread will be saved. Think about what things you
+	// should clean up or change in the thread state and scheduler state when a thread is exiting.
+	tcb* TCBcurrent = malloc(sizeof(tcb));
 
-	// YOUR CODE HERE
-};
+	// Handles context switching back to the current thread's uc_link
+	ucontext_t currContext = TCBcurrent->context;
+	ucontext_t* link = currContext.uc_link;
+	
+	if (swapcontext(&uctx_main, &uctx_func2) == -1)
+		handle_error("swapcontext");
+
+	// Frees current thread's TCB struct
+	free(TCBcurrent);
+
+	// Return 1 on success
+	if(value_ptr != NULL)
+		*value_ptr = 1;
+}; 
 
 
 /* Wait for thread termination */
 int rpthread_join(rpthread_t thread, void **value_ptr) {
-	
 	// wait for a specific thread to terminate
-	// de-allocate any dynamic memory created by the joining thread
-  
-	// YOUR CODE HERE
+	// de-allocate any dynamic memory created by the joining thread - not sure how to do this
+
+	// Invalid thread id
+	if(thread < 1){
+		return -1;
+	}
+
+	// Find thread's tcb from the tid
+	// Linearly search thru linked list of all created threads
+	tcbList* threadListPtr = list;
+	tcb* temp;
+	while(threadListPtr != NULL){
+		if(threadListPtr->currTCB->tid == thread){
+			temp = currTCB;
+		}
+	}
+
+	while(1){
+		if(temp->state == TERMINATED){
+			break;
+		}
+		rpthread_yield();
+	}
+	// think this works as a simplified version of the above but not as clear
+	// while(thread->status != TERMINATED)
+
 	return 0;
 };
 
@@ -123,10 +162,7 @@ static void schedule() {
 
 /* Round Robin (RR) scheduling algorithm */
 static void sched_rr() {
-	// Your own implementation of RR
-	// (feel free to modify arguments and return types)
-
-	// YOUR CODE HERE
+	
 }
 
 /* Preemptive MLFQ scheduling algorithm */
