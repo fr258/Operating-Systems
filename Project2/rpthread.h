@@ -53,6 +53,7 @@ typedef struct threadControlBlock {
 	void* input;
 	void* retVal;
 	int priority;
+    int joins;
 } tcb;
 
 /* mutex struct definition */
@@ -62,7 +63,7 @@ typedef struct rpthread_mutex_t {
 
 // TCB and extra fields to make linked lists
 typedef struct Node {
-	tcb* tcblock;
+	void* element;
 	struct Node* prev;
 	struct Node* next;
     int priority;

@@ -59,6 +59,7 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 	TCBtemp->function=function;
 	TCBtemp->input = arg;
 	TCBtemp->state = READY;
+	TCBtemp->joins = 0;
 	makecontext(&TCBtemp->context, functionCaller, 0);
 	
 	//printf("attempt to disarm timer\n");
@@ -81,6 +82,19 @@ int rpthread_yield() {
 	/// change thread state from Running to Ready
 	// save context of this thread to its thread control block
 	// switch from thread context to scheduler context
+
+	// Enqueue in same level
+	enqueue(&RRqueue, TCBcurrent);
+
+	// else {
+	// 	//a dequeued thread would get lost here sadly
+	// 	//printf("thread terminated: %d\n", TCBcurrent->threadId);
+	// 	tempIds[TCBcurrent->threadId] = 0;  
+	// 	//^ REMOVE LATER!******************************************************
+	// }
+
+	swapcontext(&TCBcurrent->context, schedCon);
+
 	return 0;
 };
 
@@ -92,17 +106,24 @@ void rpthread_exit(void *value_ptr) {
 	// If the value_ptr isn’t NULL, any return value from the thread will be saved. Think about what things you
 	// should clean up or change in the thread state and scheduler state when a thread is exiting.
 
-	// Frees current thread's TCB struct
-	free(TCBcurrent->context.uc_stack.ss_sp);
-	free(TCBcurrent->context);
-	free(TCBcurrent);
-	//TODO: free(node); must free node, not just the TCBcurrent since node is also dynamically allocated
-	
-	// Don't have to disconnect from DLL since already dequeued - not sure what else to do here
+	// Set thread's retVal is value_ptr != NULL to be accessed by join
+	if(value_ptr != NULL){
+		value_ptr = TCBcurrent->retVal;
+	}
 
-	// Return 1 on success
-	if(value_ptr != NULL)
-		*value_ptr = 1;
+	// Frees current thread's TCB struct only if number of threads joining running thread is 0
+	// Does not free if a thread is joining it - frees later when joins <= 0 (not sure how it would get <0)
+	if(TCBcurrent->joins <= 0){
+		free(TCBcurrent->context.uc_stack.ss_sp);
+		free(TCBcurrent->context);
+		free(TCBcurrent);
+		TCBcurrent = NULL;
+	}
+	// Only set state when threads joining on current thread - no need to when thread is getting freed
+	else{
+		TCBcurrent->state = TERMINATED;
+	}
+	// Don't have to disconnect from DLL since already dequeued - not sure what else to do here
 }; 
 
 
@@ -119,14 +140,14 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 		return -1;
 	}
 
-	// Find thread's tcb from the tid
 	// Linearly search thru linked list of all created threads
 	// Can also just search thru all threads in scheduler - don't have to wait for a thread that's not running
 	// Assume 2d linked list scheduler since join has to work for both RR and MLFQ.
 
 	// Which queue to use - probably unnecessary if we decide to only use 1 queue for both RR And ML
 	queue level = (scheduler) ? MLqueue : RRqueue;
-	node* temp;
+	node* temp = NULL;
+	tcb* foundTCB = NULL;
 	int found = 1;
 
 	// For each level in the queue, go thru each thread on that level
@@ -135,7 +156,12 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 		temp = level.head;
 		while(temp != NULL){
 			// Found thread with desired tid
-			if((temp->element != NULL) && (temp->tcblock->threadId == thread)){
+			if((temp->element != NULL) && ((tcb*)(temp->element)->threadId == thread)){
+				foundTCB = temp->tcblock;
+
+				// Incr number of joins called on desired thread
+				foundTCB->joins++;
+
 				// Use found to break out of outer while loop
 				found = 0;
 				break;
@@ -146,24 +172,38 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 	}
 
 	// Fail to find a thread with the desired tid.
-	if(temp == NULL){
+	if(foundTCB == NULL){
 		if(value_ptr != NULL)
 			**value_ptr = 0;
 		return -1;
 	}
 
 	// If tid found, loop until desired thread is terminated, at which point we are free to return
+	// think this works as a simplified version but not as readable
+	// while(foundTCB != NULL && foundTCB->state != TERMINATED)
 	while(1){
-		if(temp == NULL || temp->state == TERMINATED){
+		if(foundTCB == NULL || foundTCB->state == TERMINATED){
 			break;
 		}
+		// yielding might be needed here since not very efficient to waste time slice
+		// pthread_yield();
 	}
-	// think this works as a simplified version of the above but not as readable
-	// while(temp != NULL && thread->status != TERMINATED)
 
-	// Set to 1 on success
-	if(value_ptr != NULL)
-		**value_ptr = 1;
+	// Decr number of threads joining desired thread after joined thread finishes/is freed (shouldn't be freed)
+	foundTCB->joins--;
+
+	// Free thread stuff if no more threads are joining it
+	if(foundTCB->joins == 0){
+		free(foundTCB->context.uc_stack.ss_sp);
+		free(foundTCB->context);
+		free(foundTCB);
+		foundTCB = NULL;
+	}
+
+	// Pass on exit value
+	if(value_ptr != NULL){
+		*value_ptr = foundTCB->retVal;
+	}
 	return 0;
 };
 
@@ -248,17 +288,6 @@ static void schedule() {
 
 /* Round Robin (RR) scheduling algorithm */
 static void sched_rr() {
-	if(TCBcurrent->state != TERMINATED) {
-	//	printf("about to enqueue\n");
-		enqueue(&RRqueue, TCBcurrent);
-	}
-	else {
-		//a dequeued thread would get lost here sadly
-		//printf("thread terminated: %d\n", TCBcurrent->threadId);
-		tempIds[TCBcurrent->threadId] = 0;  
-		//^ REMOVE LATER!******************************************************
-	}
-
 	tcb* temp = (tcb*)dequeue(&RRqueue);
 	if(temp == NULL) {
 		return; //see if this breaks anything?
@@ -375,6 +404,18 @@ void* printTest3(void* input) {
 }
 
 void sigHandler(int signum) {
+	// Enqueue in same level
+	if(TCBcurrent->state != TERMINATED) {
+	//	printf("about to enqueue\n");
+		enqueue(&RRqueue, TCBcurrent);
+	}
+	// else {
+	// 	//a dequeued thread would get lost here sadly
+	// 	//printf("thread terminated: %d\n", TCBcurrent->threadId);
+	// 	tempIds[TCBcurrent->threadId] = 0;  
+	// 	//^ REMOVE LATER!******************************************************
+	// }
+
 	//printf("caught signal\n");
 	swapcontext(&TCBcurrent->context, schedCon);
 }
