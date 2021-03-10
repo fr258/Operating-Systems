@@ -34,7 +34,7 @@ queue MLqueue = {NULL, NULL, NULL, 0};
 queue blockList = {NULL, NULL}; //not in use
 llist threadMap[97] = {NULL}; //not in use, but should be because who knows where terminated threads are going at present
 tcb* TCBcurrent;
-struct itimerval timer, zeroTimer;
+struct itimerval timer, zeroTimer, tempTimer;
 struct sigaction sa;
 int tempIds[20] = {0}; //remove later!
 int scheduler; //0 if RR, 1 if MLFQ
@@ -61,16 +61,16 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 	TCBtemp->state = READY;
 	makecontext(&TCBtemp->context, functionCaller, 0);
 	
-	//printf("attempt to disarm timer\n");
-	setitimer(ITIMER_REAL, &zeroTimer, NULL); //this line succeeds in disarming
+	//printf("pause timer: %ld\n", timer.it_value.tv_usec);
+	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //this line succeeds in disarming
 	
 	TCBtemp->threadId = ++maxThreadId;
 	*thread = TCBtemp->threadId;
 	tempIds[TCBtemp->threadId] = 1;
 	enqueue(&RRqueue, TCBtemp);
 	
-	//printf("attempt to arm timer\n");
-	setitimer(ITIMER_REAL, &timer, NULL);
+	//printf("resume timer: %ld\n", tempTimer.it_value.tv_usec);
+	setitimer(ITIMER_REAL, &tempTimer, NULL);
 	
 	//printf("end create\n");
 	return 0;
@@ -170,30 +170,33 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, 
                          const pthread_mutexattr_t *mutexattr) {
-	/*  //initialize data structures for this mutex
+	  //initialize data structures for this mutex
+	mutex = malloc(sizeof(mutex));
 	*(mutex->lock) = 0;
-	mutex->list = malloc(sizeof(LinkedList));
-	mutex->list.head = NULL;
+	mutex->blockList = malloc(sizeof(queue));
+	mutex->blockList->head = NULL;
+	mutex->locker = -1;
 	// YOUR CODE HERE*/
 	return 0;
 };
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
-	// use the built-in test-and-set atomic function to test the mutex
-	// if the mutex is acquired successfully, enter the critical section
-	// if acquisigHandler mutex fails, push current thread into block list and //  
-	// context switch to the scheduler thread
-	
-	/*  // YOUR CODE HERE
-	if(__sync_lock_test_and_set(mutex->lock, 1)==1) { //lock not acquired
-		TCBcurrent.state = BLOCKED;
-		//add(mutex->list, TCBcurrent);
-		swapcontext(TCBcurrent.context, &schedCon);
-	}
-	*/
-	
-	return 0;
+        // use the built-in test-and-set atomic function to test the mutex
+        // if the mutex is acquired successfully, enter the critical section
+        // if acquisigHandler mutex fails, push current thread into block list and //  
+        // context switch to the scheduler thread
+		
+        // YOUR CODE HERE
+		if(__sync_lock_test_and_set(mutex->lock, 1)==1) { //lock not acquired
+			TCBcurrent->state = BLOCKED;
+			
+			setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //disarm timer for enqueueing
+			enqueue(mutex->blockList, TCBcurrent);
+			setitimer(ITIMER_REAL, &tempTimer, NULL);
+		}
+		mutex->locker = TCBcurrent->threadId;
+        return 0;
 };
 
 
@@ -203,15 +206,30 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
 
+	// YOUR CODE HERE
+	if(mutex->locker != TCBcurrent->threadId) //nonlocking thread is attempting to free
+		return -1;
+		
 	__sync_lock_test_and_set(mutex->lock, 0); //release lock
+	
+	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //pause timer
+	tcb* temp;
+	while((temp = (tcb*)dequeue(mutex->blockList)) != NULL) {
+		temp->state = READY;
+	}
+	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
 	
 	return 0;
 };
 
 
 /* destroy the mutex */
-// Deallocate dynamic memory created in rpthread_mutex_init
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
+	// Deallocate dynamic memory created in rpthread_mutex_init
+	tcb* temp;
+	while((temp = (tcb*)dequeue(mutex->blockList)) != NULL); //destroy blocklist, doesn't set threads to ready
+	free(mutex->blockList);
+	free(mutex);
 	return 0;
 };
 
@@ -243,6 +261,10 @@ static void schedule() {
 		// CODE 2
 	#endif
 		//printf("in schedule\n");
+	
+	TCBcurrent->state = RUNNING;
+	setitimer(ITIMER_REAL, &timer, NULL);
+	setcontext(&TCBcurrent->context);
 
 }
 
@@ -260,18 +282,15 @@ static void sched_rr() {
 	}
 
 	tcb* temp = (tcb*)dequeue(&RRqueue);
+	while(temp != NULL && temp->state == BLOCKED) {
+		enqueue(&RRqueue, temp); //return blocked context to queue
+		temp = (tcb*)dequeue(&RRqueue); //try next context in list
+	}
 	if(temp == NULL) {
 		return; //see if this breaks anything?
 	}
 	//printf("wasn't null\n");
 	TCBcurrent = temp;
-	timer.it_value.tv_usec = 1000;
-	//printf("val is %ld\n", timer.it_value.tv_usec);
-	setitimer(ITIMER_REAL, &timer, NULL);
-//	printf("swapping to %d \n", TCBcurrent->threadId);
-	setcontext(&TCBcurrent->context);
-	
-	//printf("made it here\n");
 }
 
 /* Preemptive MLFQ scheduling algorithm */
@@ -332,12 +351,13 @@ void* dequeue(queue *inQueue) {
 	//printf("in dequeue\n");
 	if(inQueue->head != NULL) {
 		void* temp = inQueue->head->element;
+		node* tempNode = inQueue->head;
 		inQueue->head = inQueue->head->next;
+		free(tempNode);
 		if(inQueue->head != NULL)
 			inQueue->head->prev = NULL;
 		return temp;
 	}
-	//printf("dequeue head is null\n");
 	return NULL;
 }
 
@@ -346,6 +366,7 @@ void functionCaller() {
 	//printf("caller: %d\n", TCBcurrent->threadId);
 	TCBcurrent->retVal = TCBcurrent->function(TCBcurrent->input);
 	TCBcurrent->state = TERMINATED;
+	setitimer(ITIMER_REAL, &zeroTimer, NULL); //pause timer, returning to scheduler
 }
 
 void* printTest(void* input) {
@@ -399,6 +420,11 @@ int init() {
 	zeroTimer.it_value.tv_sec = 0;
 	zeroTimer.it_interval.tv_usec = 0; 
 	zeroTimer.it_interval.tv_sec = 0;
+	
+	tempTimer.it_value.tv_usec = 0; 
+	tempTimer.it_value.tv_sec = 0;
+	tempTimer.it_interval.tv_usec = 0; 
+	tempTimer.it_interval.tv_sec = 0;
 	
 	//create main context
 	mainCon = malloc(sizeof(ucontext_t));
