@@ -127,7 +127,7 @@ static void schedule();
 #define pthread_create rpthread_create
 #define pthread_exit rpthread_exit
 #define pthread_join rpthread_join
-#define pthread_yield rpthread_ield
+#define pthread_yield rpthread_yield
 #define pthread_mutex_init rpthread_mutex_init
 #define pthread_mutex_lock rpthread_mutex_lock
 #define pthread_mutex_unlock rpthread_mutex_unlock
