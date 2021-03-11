@@ -617,3 +617,13 @@ int main(int argc, char** argv) {
 
 	return 0;
 }
+
+void exitMain() {
+	//free main and maincontext
+	setitimer(ITIMER_REAL, &zeroTimer, NULL);
+	
+	free(TCBcurrent->context.uc_stack.ss_sp);
+	free(TCBcurrent);
+	
+	free(schedCon);
+}
