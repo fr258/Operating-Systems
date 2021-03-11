@@ -8,7 +8,7 @@
  */
 #include "rpthread.h"
 
-
+	#define MLFQ
 // INITIALIZE ALL YOUR VARIABLES HERE
 // YOUR CODE HERE
 /* create a new thread */
@@ -22,21 +22,19 @@ void schedule();
 int init();
 void* printTest2(void* input);
 void* printTest3(void* input);
-//static void sched_rr();
-//static void sched_mlfq();
 void exitMain();
+void contextExiter();
 
 //GLOBALS
 //***************************************************
-ucontext_t *schedCon = NULLL, *dummyCon = NULL;
+ucontext_t *schedCon = NULL;
 queue MQueue = {NULL, NULL, NULL, 0};
-queue blockList = {NULL, NULL}; //not in use
-llist threadMap[97] = {NULL}; //not in use, but should be because who knows where terminated threads are going at present
+queue mutexList = {NULL, NULL}; 
 tcb* TCBcurrent;
 struct itimerval timer, zeroTimer, tempTimer;
 struct sigaction sa;
-int tempIds[20] = {0}; //remove later!
 int scheduler; //0 if RR, 1 if MLFQ
+tcb *threadId[500] = {NULL};
 //***************************************************
 
 
@@ -59,17 +57,18 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 	TCBtemp->input = arg;
 	TCBtemp->state = READY;
 	TCBtemp->priority = 1;
-	makecontext(&TCBtemp->context, functionCaller, 0);
 	
 	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //disarm timer
 	
+	makecontext(&TCBtemp->context, functionCaller, 0);
+
 	TCBtemp->threadId = ++maxThreadId;
-	*thread = TCBtemp->threadId;
-	tempIds[TCBtemp->threadId] = 1;
+	threadId[TCBtemp->threadId] = TCBtemp; //store thread tcb in array
+	*thread = TCBtemp->threadId; //set input val to set thread
 	enqueue(&MQueue, TCBtemp); //enqueue in level 1
 	
 	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
-	
+
 	return 0;
 }
 
@@ -122,33 +121,23 @@ void rpthread_exit(void *value_ptr) {
 
 	// Stop timer - thread already exiting, no point in switching out now
 	// IDK HOW TO DO THIS
-
-	// Should NOT be null already
-	if(TCBcurrent != NULL){
-		swapcontext(dummyCon, schedCon);
-	}
+	setitimer(ITIMER_REAL, &zeroTimer, NULL);
 
 	// Set thread's retVal if value_ptr != NULL - used later to be accessed by join
-	if(value_ptr != NULL){
-		TCBcurrent->retVal = value_ptr;
-	}
+	value_ptr = TCBcurrent->retVal;
 
 	// Always frees context stack
 	free(TCBcurrent->context.uc_stack.ss_sp);
 	// TCBcurrent->context = NULL;
 
-	// Frees current thread's TCB struct only if number of threads joining running thread is 0 - joining threads need to access value_ptr
-	// Does not free if a thread is joining it - frees later when joins <= 0 (not sure how it would get <0)
-	if(TCBcurrent->joins <= 0){
+	TCBcurrent->state = TERMINATED;
+	
+	if(TCBcurrent->joins == 0) {
 		free(TCBcurrent);
-		TCBcurrent = NULL;
 	}
-	// Only set state when thread(s) joining on current thread - no need to when thread is getting freed
-	else{
-		TCBcurrent->state = TERMINATED;
-	}
+	
 
-	swapcontext(dummyCon, schedCon);
+	setcontext(schedCon);
 }
 
 
@@ -159,12 +148,36 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 	// de-allocate any dynamic memory created by the joining thread
 	// while(tempIds[thread]!=0); //testing only! tempIds won't exist later
 	// de-allocate any dynamic memory created by the joining thread - not sure how to do this
-
 	// Invalid thread id
-	if(thread < 1){
+	//setitimer(ITIMER_REAL, &zeroTimer, NULL);
+	if(thread < 1 || thread >= 500){
 		return -1;
 	}
+	
+	tcb *TCBtemp = threadId[thread];
+	
+	//thread not found
+	if(TCBtemp == NULL) {
+		return -1;
+	}
+	else { //indicate intention to join
+		TCBtemp->joins++;
+	}
+	
+	while(TCBtemp->state != TERMINATED); //busy wait for thread to finish
+	
+	value_ptr = &TCBtemp->retVal;
 
+	
+
+	if(TCBtemp->joins == 1)
+		free(TCBtemp);
+		
+	TCBtemp->joins--;
+
+	
+	
+/*
 	// Linearly search thru linked list of all created threads
 	// Can also just search thru all threads in scheduler - don't have to wait for a thread that's not running
 	// Assume 2d linked list scheduler since join has to work for both RR and MLFQ.
@@ -257,6 +270,7 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 	if(value_ptr != NULL){
 		*value_ptr = foundTCB->retVal;
 	}
+	*/
 	return 0;
 }
 
@@ -270,7 +284,7 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex,
 	mutex->blockList = malloc(sizeof(queue));
 	mutex->blockList->head = NULL;
 	mutex->locker = -1;
-	//enqueue(&mutexList, mutex);
+	enqueue(&mutexList, mutex);
 	return 0;
 };
 
@@ -280,9 +294,10 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
         // if the mutex is acquired successfully, enter the critical section
         // if acquisigHandler mutex fails, push current thread into block list and //  
         // context switch to the scheduler thread
-		
+		//printf("lock mutex\n");
 		getcontext(&TCBcurrent->context);
 		if(__sync_lock_test_and_set(mutex->lock, 1)==1) { //lock not acquired
+			//printf("lock not acquired\n");
 			TCBcurrent->state = BLOCKED;
 			
 			setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //disarm timer for enqueueing
@@ -335,6 +350,7 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 	return 0;
 };
 
+
 /* scheduler */
 static void schedule() {
 	// Every time when timer interrupt happens, your thread library 
@@ -366,12 +382,20 @@ static void schedule() {
 	// from RR
 	// Dequeue from highest non-empty priority queue 
 	queue* queuePtr = &MQueue;
+	tcb* temp = NULL;
 	// Keep dequeueing from ptr until a non-null tcb is returned
-	tcb* temp = (tcb*)dequeue(queuePtr);
+	/*tcb* temp = (tcb*)dequeue(queuePtr);
 	while(queuePtr!=NULL && temp == NULL){
 		temp = (tcb*)dequeue(queuePtr);
 		queuePtr = queuePtr->next;
+	}*/
+	while(queuePtr != NULL) {
+		if((temp = dequeue(queuePtr)) != NULL)
+			break;
+		else
+			queuePtr = queuePtr->next; //check lower priority queue	
 	}
+	
 	// // Keep dequeueing next node until a non-blocked node is returned (obselete)
 	// while(temp != NULL && temp->state == BLOCKED) {
 	// 	enqueue(&RRqueue, temp); //return blocked context to queue
@@ -416,17 +440,7 @@ void enqueue(queue* inQueue, void* inElement) {
 			printf("inqueue head is %p but rr head is %p\n", inQueue->head, RRqueue.head);
 		}*/
 	}
-	
-	
-	/* node* temp = inQueue->head;
-	printf("queue: ");
-	while(temp != NULL) {
-		printf("%d ",(int)(((tcb*)(temp->element))->threadId));
-		temp = temp->next;
-	}
-	printf("\n");*/
-	
-	//printf("successfully enqueued\n");
+
 }
 
 void* dequeue(queue *inQueue) {
@@ -451,39 +465,8 @@ void functionCaller() {
 	setitimer(ITIMER_REAL, &zeroTimer, NULL); //pause timer, returning to scheduler
 }
 
-void* printTest(void* input) {
-	
-	printf("printing thread %d\n", TCBcurrent->threadId);
-	int *x = malloc(sizeof(int));
-	while(*x<100000) (*x)++;
-	printf("printing thread %d again\n", TCBcurrent->threadId);
-	rpthread_t thread;
-	rpthread_create(&thread, NULL, printTest2, x);
-	void* ret;
-	rpthread_join(thread, &ret);
-	printf("joined %d", *(int*)ret);
-	return NULL;
-}
-
-void* printTest2(void* input) {
-	printf("in printTest2: %d called by %d\n", *(int*)input, TCBcurrent->threadId);
-	int test = 17;
-	rpthread_t thread;
-	rpthread_create(&thread, NULL, printTest3, &test);
-	rpthread_join(thread, NULL);
-	int* ret;
-	*ret = 4;
-	rpthread_exit((void*)ret);
-	return NULL;
-}
-
-void* printTest3(void* input) {
-	printf("in printTest3: %d called by %d\n",  *(int*)input, TCBcurrent->threadId);
-	return NULL;
-}
-
 void sigHandler(int signum) {
-	//printf("caught signal\n");
+	//printf("caught signal: %d\n", TCBcurrent->threadId);
 
 	// Enqueue in next level - for RR and ML last queue, next level is current level
 	queue* queuePtr = &MQueue;
@@ -501,25 +484,28 @@ void sigHandler(int signum) {
 }
 
 int init() {
+	
 	//set up schedule queue(s)
 	#ifdef MLFQ
-	//priority level 2
-	MQueue.next = malloc(sizeof(queue)); 
-	MQueue.next->priority = 2;
-	MQueue.next->head = NULL;
-	MQueue.next->tail = NULL;
-	
-	//priority level 3
-	MQueue.next->next = malloc(sizeof(queue)); 
-	MQueue.next->next->priority = 3;
-	MQueue.next->next->head = NULL;
-	MQueue.next->next->tail = NULL;
-	
-	//priority level 4
-	MQueue.next->next->next = malloc(sizeof(queue)); 
-	MQueue.next->next->next->priority = 4;
-	MQueue.next->next->next->head = NULL;
-	MQueue.next->next->next->tail = NULL;
+		//priority level 2
+		MQueue.next = malloc(sizeof(queue)); 
+		MQueue.next->priority = 2;
+		MQueue.next->head = NULL;
+		MQueue.next->tail = NULL;
+		
+		//priority level 3
+		MQueue.next->next = malloc(sizeof(queue)); 
+		MQueue.next->next->priority = 3;
+		MQueue.next->next->head = NULL;
+		MQueue.next->next->tail = NULL;
+		
+		//priority level 4
+		MQueue.next->next->next = malloc(sizeof(queue)); 
+		MQueue.next->next->next->priority = 4;
+		MQueue.next->next->next->head = NULL;
+		MQueue.next->next->next->tail = NULL;
+		MQueue.next->next->next->next = NULL;
+		
 	#endif
 	
 	//register signal handler
@@ -531,7 +517,7 @@ int init() {
 	sigaction (SIGALRM, &sa, NULL);
 	
 	//initialize timers
-	timer.it_value.tv_usec = 1000; 
+	timer.it_value.tv_usec = 1000*TIMESLICE; 
 	timer.it_value.tv_sec = 0;
 	timer.it_interval.tv_usec = 0; 
 	timer.it_interval.tv_sec = 0;
@@ -548,7 +534,6 @@ int init() {
 	
 	//create main context
 	getcontext(&TCBcurrent->context);
-
 	
 	//create scheduling context
 	schedCon = malloc(sizeof(ucontext_t));
@@ -558,50 +543,23 @@ int init() {
 	//schedCon->uc_link = mainCon;
 	makecontext(schedCon, schedule, 0);
 	
-	// atexit(exitMain);
-	
+	atexit(exitMain);
 	setitimer(ITIMER_REAL, &timer, NULL);
 	
 	return 0;
 }
 
 
-int main(int argc, char** argv) {
-	//0 if RR, 1 if MLFQ
-	// assuming: gcc -pthread -g -c rpthread.c -DTIMESLICE=$(TSLICE)		for RR
-	//			 gcc -pthread -g -c rpthread.c -DMLFQ -DTIMESLICE=$(TSLICE)	for MLFQ
-	scheduler = (argc == 6) ? 0 : 1;
 
-	rpthread_t thread1 = 0,	thread2 =0, thread3 =0, thread4=0, thread5=0;
-	int a = 3;
-	int b = 5;
-	int c = 10;
-	int d = 15;
-	int e = 20;
-	int x = 0;
-	rpthread_create(&thread1, NULL, printTest, &a);
-	rpthread_create(&thread2, NULL, printTest2, &b);
-	rpthread_create(&thread3, NULL, printTest2, &c);
-	rpthread_create(&thread4, NULL, printTest2, &d);
-	rpthread_create(&thread5, NULL, printTest2, &e);
-	//printf("%d %d %d %d %d\n", thread1, thread2, thread3, thread4, thread5);
-	while(x<1000000) x++; //kill some time
-	rpthread_join(thread1, NULL);
-	rpthread_join(thread2, NULL);
-	rpthread_join(thread3, NULL);
-	rpthread_join(thread4, NULL);
-	rpthread_join(thread5, NULL);
-	printf("MAIN RETURNED\n");
-
-	return 0;
-}
 
 void exitMain() {
 	//stop timer
-	setitimer(ITIMER_REAL, &zeroTimer, NULL); 
+	/* setitimer(ITIMER_REAL, &zeroTimer, NULL); 
 	//free main context
-	free(TCBcurrent->context.uc_stack.ss_sp); 
-	free(TCBcurrent);
+	if(TCBcurrent != NULL) {
+		free(TCBcurrent->context.uc_stack.ss_sp); 
+		free(TCBcurrent);
+	}
 	queue* queuePtr = &MQueue;
 	tcb *TCBtemp;
 	//free multilevel queues
@@ -625,8 +583,16 @@ void exitMain() {
 			free(TCBtemp);
 		}
 	#endif
-	//free scheduling context
 	free(schedCon->uc_stack.ss_sp); 
-	free(schedCon);
+	free(schedCon); */
 }
+
+
+
+
+
+
+
+
+
 
