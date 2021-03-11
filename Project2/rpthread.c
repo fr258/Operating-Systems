@@ -619,11 +619,36 @@ int main(int argc, char** argv) {
 }
 
 void exitMain() {
-	//free main and maincontext
-	setitimer(ITIMER_REAL, &zeroTimer, NULL);
+	//stop timer
+	setitimer(ITIMER_REAL, &zeroTimer, NULL); 
 	
-	free(TCBcurrent->context.uc_stack.ss_sp);
+	//free main context
+	free(TCBcurrent->context.uc_stack.ss_sp); 
 	free(TCBcurrent);
 	
+	queue* queuePtr = &MQueue;
+	tcb *TCBtemp;
+	//free multilevel queues
+	#ifdef MLFQ
+		//free contexts that might still exist at time of main's return
+		while(queuePtr != NULL){ 
+			while((TCBtemp = dequeue(queuePtr)) != NULL) {
+				free(TCBtemp->context.uc_stack.ss_sp);
+				free(TCBtemp);
+			}
+			queuePtr = queuePtr->next;
+		}
+		free(queuePtr); //free priority 4 queue
+		free(MQueue.next->next); //free priority 3 queue
+		free(MQueue.next); //free priority 2 queue
+	#else 
+	//free RR queue's contexts that might still exist at time of main's return
+		while((TCBtemp = dequeue(queuePtr)) != NULL) {
+			free(TCBtemp->context.uc_stack.ss_sp);
+			free(TCBtemp);
+		}
+	#endif
 	free(schedCon);
 }
+
+
