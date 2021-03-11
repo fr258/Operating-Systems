@@ -392,31 +392,6 @@ static void schedule() {
 	TCBcurrent = temp;
 }
 
-// /* Round Robin (RR) scheduling algorithm */
-// static void sched_rr() {
-// 	tcb* temp = (tcb*)dequeue(&RRqueue);
-// 	while(temp != NULL && temp->state == BLOCKED) {
-// 		enqueue(&RRqueue, temp); //return blocked context to queue
-// 		temp = (tcb*)dequeue(&RRqueue); //try next context in list
-// 	}
-// 	if(temp == NULL) {
-// 		return; //see if this breaks anything?
-// 	}
-// 	//printf("wasn't null\n");
-// 	TCBcurrent = temp;
-// }
-
-// /* Preemptive MLFQ scheduling algorithm */
-// // 4 level
-// // stuff that changes going from RR to ML:
-// // 		upon using the whole time slice without yielding, enqueue on level priority-1 - happens in signal handler
-// // stuff that doesn't have to:
-// // 		dequeueing from highest priority level - keep checking each level's queue until find non-empty queue
-// // 		searching for a specific thread id - same as above
-// static void sched_mlfq() {
-// 	return;
-// }
-
 void enqueue(queue* inQueue, void* inElement) {
 	//is queue empty?
 	if(inQueue->head != NULL) {
@@ -486,7 +461,9 @@ void* printTest(void* input) {
 	printf("printing thread %d again\n", TCBcurrent->threadId);
 	rpthread_t thread;
 	rpthread_create(&thread, NULL, printTest2, x);
-	rpthread_join(thread, NULL);
+	void* ret;
+	rpthread_join(thread, &ret);
+	printf("joined %d", *(int*)ret);
 	return NULL;
 }
 
@@ -496,6 +473,9 @@ void* printTest2(void* input) {
 	rpthread_t thread;
 	rpthread_create(&thread, NULL, printTest3, &test);
 	rpthread_join(thread, NULL);
+	int* ret;
+	*ret = 4;
+	rpthread_exit((void*)ret);
 	return NULL;
 }
 
