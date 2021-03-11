@@ -22,13 +22,13 @@ void schedule();
 int init();
 void* printTest2(void* input);
 void* printTest3(void* input);
-static void sched_rr();
-static void sched_mlfq();
-
+//static void sched_rr();
+//static void sched_mlfq();
+void exitMain();
 
 //GLOBALS
 //***************************************************
-ucontext_t *schedCon = NULL, *mainCon = NULL, *dummyCon = NULL;
+ucontext_t *schedCon = NULLL, *dummyCon = NULL;
 queue MQueue = {NULL, NULL, NULL, 0};
 queue blockList = {NULL, NULL}; //not in use
 llist threadMap[97] = {NULL}; //not in use, but should be because who knows where terminated threads are going at present
@@ -307,22 +307,23 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 		
 	__sync_lock_test_and_set(mutex->lock, 0); //release lock
 	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //pause timer
-	tcb* temp;
-	while((temp = (tcb*)dequeue(mutex->blockList)) != NULL) {
-		temp->state = READY;
-		if(temp->priority==1)
-			enqueue(&MQueue, temp);
-		else if(temp->priority==2)
-			enqueue(MQueue.next, temp);
-		else if(temp->priority==3)
-			enqueue(MQueue.next->next, temp);
-		else
-			enqueue(MQueue.next->next->next, temp);
+	tcb* TCBtemp;
+	queue* queuePtr = &MQueue;
+	while((TCBtemp = (tcb*)dequeue(mutex->blockList)) != NULL) {
+		// Get queue corresponding to current thread's priority
+		TCBtemp->state = READY;
+		queuePtr = &MQueue;
+		while(queuePtr->priority < TCBcurrent->priority){
+			queuePtr = queuePtr->next;
+		}
+		// Enqueue at same level
+		enqueue(queuePtr, TCBtemp);
 	}
 	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
 	
 	return 0;
 };
+
 
 
 /* destroy the mutex */
@@ -333,7 +334,6 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 	free(mutex->blockList);
 	return 0;
 };
-
 
 /* scheduler */
 static void schedule() {
@@ -362,22 +362,16 @@ static void schedule() {
 	// 	// CODE 2
 	// #endif
 	// 	//printf("in schedule\n");
-	
-	TCBcurrent->state = RUNNING;
-	setitimer(ITIMER_REAL, &timer, NULL);
-	setcontext(&TCBcurrent->context);
 
 	// from RR
 	// Dequeue from highest non-empty priority queue 
 	queue* queuePtr = &MQueue;
-
 	// Keep dequeueing from ptr until a non-null tcb is returned
 	tcb* temp = (tcb*)dequeue(queuePtr);
-	while(temp == NULL){
+	while(queuePtr!=NULL && temp == NULL){
 		temp = (tcb*)dequeue(queuePtr);
 		queuePtr = queuePtr->next;
 	}
-
 	// // Keep dequeueing next node until a non-blocked node is returned (obselete)
 	// while(temp != NULL && temp->state == BLOCKED) {
 	// 	enqueue(&RRqueue, temp); //return blocked context to queue
@@ -390,6 +384,10 @@ static void schedule() {
 	}
 	//printf("wasn't null\n");
 	TCBcurrent = temp;
+	
+	TCBcurrent->state = RUNNING;
+	setitimer(ITIMER_REAL, &timer, NULL);
+	setcontext(&TCBcurrent->context);
 }
 
 void enqueue(queue* inQueue, void* inElement) {
@@ -597,3 +595,38 @@ int main(int argc, char** argv) {
 
 	return 0;
 }
+
+void exitMain() {
+	//stop timer
+	setitimer(ITIMER_REAL, &zeroTimer, NULL); 
+	//free main context
+	free(TCBcurrent->context.uc_stack.ss_sp); 
+	free(TCBcurrent);
+	queue* queuePtr = &MQueue;
+	tcb *TCBtemp;
+	//free multilevel queues
+	#ifdef MLFQ
+		//free contexts that might still exist at time of main's return
+		while(queuePtr != NULL){ 
+			while((TCBtemp = dequeue(queuePtr)) != NULL) {
+				free(TCBtemp->context.uc_stack.ss_sp);
+				free(TCBtemp);
+			}
+			queuePtr = queuePtr->next;
+		}
+		free(MQueue.next->next->next); //free priority 4 queue
+		free(MQueue.next->next); //free priority 3 queue
+		free(MQueue.next); //free priority 2 queue
+		
+	#else 
+	//free RR queue's contexts that might still exist at time of main's return
+		while((TCBtemp = dequeue(queuePtr)) != NULL) {
+			free(TCBtemp->context.uc_stack.ss_sp);
+			free(TCBtemp);
+		}
+	#endif
+	//free scheduling context
+	free(schedCon->uc_stack.ss_sp); 
+	free(schedCon);
+}
+
