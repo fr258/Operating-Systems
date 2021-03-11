@@ -307,22 +307,23 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 		
 	__sync_lock_test_and_set(mutex->lock, 0); //release lock
 	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //pause timer
-	tcb* temp;
-	while((temp = (tcb*)dequeue(mutex->blockList)) != NULL) {
-		temp->state = READY;
-		if(temp->priority==1)
-			enqueue(&MQueue, temp);
-		else if(temp->priority==2)
-			enqueue(MQueue.next, temp);
-		else if(temp->priority==3)
-			enqueue(MQueue.next->next, temp);
-		else
-			enqueue(MQueue.next->next->next, temp);
+	tcb* TCBtemp;
+	queue* queuePtr = &MQueue;
+	while((TCBtemp = (tcb*)dequeue(mutex->blockList)) != NULL) {
+		// Get queue corresponding to current thread's priority
+		TCBtemp->state = READY;
+		queuePtr = &MQueue;
+		while(queuePtr->priority < TCBcurrent->priority){
+			queuePtr = queuePtr->next;
+		}
+		// Enqueue at same level
+		enqueue(queuePtr, TCBtemp);
 	}
 	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
 	
 	return 0;
 };
+
 
 
 /* destroy the mutex */
@@ -648,6 +649,7 @@ void exitMain() {
 			free(TCBtemp);
 		}
 	#endif
+	free(schedCon->uc_stack.ss_sp); 
 	free(schedCon);
 }
 
