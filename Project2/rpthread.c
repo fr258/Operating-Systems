@@ -8,7 +8,6 @@
  */
 #include "rpthread.h"
 
-	#define MLFQ
 // INITIALIZE ALL YOUR VARIABLES HERE
 // YOUR CODE HERE
 /* create a new thread */
@@ -28,7 +27,7 @@ void contextExiter();
 //GLOBALS
 //***************************************************
 ucontext_t *schedCon = NULL;
-queue MQueue = {NULL, NULL, NULL, 0};
+queue MQueue = {NULL, NULL, NULL, 1};
 queue mutexList = {NULL, NULL}; 
 tcb* TCBcurrent;
 struct itimerval timer, zeroTimer, tempTimer;
@@ -125,7 +124,8 @@ void rpthread_exit(void *value_ptr) {
 
 	// Set thread's retVal if value_ptr != NULL - used later to be accessed by join
 	value_ptr = TCBcurrent->retVal;
-
+	int tempId = TCBcurrent->threadId;
+	
 	// Always frees context stack
 	free(TCBcurrent->context.uc_stack.ss_sp);
 	// TCBcurrent->context = NULL;
@@ -135,6 +135,8 @@ void rpthread_exit(void *value_ptr) {
 	if(TCBcurrent->joins == 0) {
 		free(TCBcurrent);
 	}
+	
+	threadId[tempId] = NULL;
 	
 
 	setcontext(schedCon);
@@ -294,12 +296,10 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
         // if the mutex is acquired successfully, enter the critical section
         // if acquisigHandler mutex fails, push current thread into block list and //  
         // context switch to the scheduler thread
-		//printf("lock mutex\n");
 		getcontext(&TCBcurrent->context);
 		if(__sync_lock_test_and_set(mutex->lock, 1)==1) { //lock not acquired
 			//printf("lock not acquired\n");
 			TCBcurrent->state = BLOCKED;
-			
 			setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //disarm timer for enqueueing
 			enqueue(mutex->blockList, TCBcurrent);
 			setcontext(schedCon);
@@ -324,16 +324,19 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //pause timer
 	tcb* TCBtemp;
 	queue* queuePtr = &MQueue;
+	//printf("unlock\n");
 	while((TCBtemp = (tcb*)dequeue(mutex->blockList)) != NULL) {
 		// Get queue corresponding to current thread's priority
 		TCBtemp->state = READY;
 		queuePtr = &MQueue;
+		//printf("queue:%d current:%d\n",queuePtr->priority,TCBcurrent->priority );
 		while(queuePtr->priority < TCBcurrent->priority){
 			queuePtr = queuePtr->next;
 		}
 		// Enqueue at same level
 		enqueue(queuePtr, TCBtemp);
 	}
+	//printf("unlocked\n");
 	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
 	
 	return 0;
@@ -395,6 +398,7 @@ static void schedule() {
 		else
 			queuePtr = queuePtr->next; //check lower priority queue	
 	}
+
 	
 	// // Keep dequeueing next node until a non-blocked node is returned (obselete)
 	// while(temp != NULL && temp->state == BLOCKED) {
@@ -410,6 +414,7 @@ static void schedule() {
 	TCBcurrent = temp;
 	
 	TCBcurrent->state = RUNNING;
+	//printf("end schedCon\n");
 	setitimer(ITIMER_REAL, &timer, NULL);
 	setcontext(&TCBcurrent->context);
 }
@@ -440,7 +445,6 @@ void enqueue(queue* inQueue, void* inElement) {
 			printf("inqueue head is %p but rr head is %p\n", inQueue->head, RRqueue.head);
 		}*/
 	}
-
 }
 
 void* dequeue(queue *inQueue) {
@@ -467,7 +471,6 @@ void functionCaller() {
 
 void sigHandler(int signum) {
 	//printf("caught signal: %d\n", TCBcurrent->threadId);
-
 	// Enqueue in next level - for RR and ML last queue, next level is current level
 	queue* queuePtr = &MQueue;
 	int counter = 1;
@@ -554,7 +557,7 @@ int init() {
 
 void exitMain() {
 	//stop timer
-	/* setitimer(ITIMER_REAL, &zeroTimer, NULL); 
+	setitimer(ITIMER_REAL, &zeroTimer, NULL); 
 	//free main context
 	if(TCBcurrent != NULL) {
 		free(TCBcurrent->context.uc_stack.ss_sp); 
@@ -584,7 +587,7 @@ void exitMain() {
 		}
 	#endif
 	free(schedCon->uc_stack.ss_sp); 
-	free(schedCon); */
+	free(schedCon); 
 }
 
 
