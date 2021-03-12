@@ -8,32 +8,22 @@
  */
 #include "rpthread.h"
 
-// INITIALIZE ALL YOUR VARIABLES HERE
-// YOUR CODE HERE
-/* create a new thread */
-int create(rpthread_t * thread, pthread_attr_t * attr, void *(*function)(void*), void * arg);
 void* dequeue(queue *inQueue);
 void enqueue(queue *inQueue, void* inElement);
 void functionCaller();
-void* printTest(void*);//remove with function later
 void sigHandler(int);
 void schedule();
 int init();
-void* printTest2(void* input);
-void* printTest3(void* input);
 void exitMain();
-void contextExiter();
 
 //GLOBALS
 //***************************************************
 ucontext_t *schedCon = NULL;
 queue MQueue = {NULL, NULL, NULL, 1};
-queue mutexList = {NULL, NULL}; 
 tcb* TCBcurrent;
 struct itimerval timer, zeroTimer, tempTimer;
 struct sigaction sa;
-int scheduler; //0 if RR, 1 if MLFQ
-tcb *threadId[500] = {NULL};
+tcb *threadId[1000] = {NULL};
 //***************************************************
 
 
@@ -62,8 +52,8 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 	makecontext(&TCBtemp->context, functionCaller, 0);
 
 	TCBtemp->threadId = ++maxThreadId;
-	
-	threadId[TCBtemp->threadId] = TCBtemp; //store thread tcb in array
+	if(TCBtemp->threadId<1000)
+		threadId[TCBtemp->threadId] = TCBtemp; //store thread tcb in array
 	*thread = TCBtemp->threadId; //set input val to set thread
 	enqueue(&MQueue, TCBtemp); //enqueue in level 1
 	
@@ -138,7 +128,7 @@ void rpthread_exit(void *value_ptr) {
 int rpthread_join(rpthread_t thread, void **value_ptr) {
 
 	// Check for valid thread id
-	if(thread < 1 || thread >= 500){
+	if(thread < 1 || thread >= 1000){
 		return -1;
 	}
 
@@ -171,7 +161,6 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 
 	return 0;
 }
-
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, 
                          const pthread_mutexattr_t *mutexattr) {
@@ -181,8 +170,8 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex,
 	*(mutex->lock) = 0;
 	mutex->blockList = malloc(sizeof(queue));
 	mutex->blockList->head = NULL;
+	mutex->blockList->tail = NULL;
 	mutex->locker = -1;
-	enqueue(&mutexList, mutex);
 	return 0;
 };
 
@@ -192,18 +181,22 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
         // if the mutex is acquired successfully, enter the critical section
         // if acquisigHandler mutex fails, push current thread into block list and //  
         // context switch to the scheduler thread
+		
+		setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //disarm timer for enqueueing
 		getcontext(&TCBcurrent->context);
-		if(__sync_lock_test_and_set(mutex->lock, 1)==1) { //lock not acquired
+		if(*(mutex->lock) == 1) { //lock not acquired
 			//printf("lock not acquired\n");
 			TCBcurrent->state = BLOCKED;
-			setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //disarm timer for enqueueing
 			enqueue(mutex->blockList, TCBcurrent);
 			setcontext(schedCon);
 			return 0;
+			
 		}
 		else {
+			*(mutex->lock) = 1;
 			mutex->locker = TCBcurrent->threadId;	
-		}
+		} 
+		setitimer(ITIMER_REAL, &timer, NULL); //resume timer
         return 0;
 };
 
@@ -213,30 +206,33 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
 
-	if(mutex->locker != TCBcurrent->threadId) //nonlocking thread is attempting to free
-		return -1;
+	//if(mutex->locker != TCBcurrent->threadId) //nonlocking thread is attempting to free
+	//	return -1;
 		
-	__sync_lock_test_and_set(mutex->lock, 0); //release lock
 	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //pause timer
+	
+	*(mutex->lock) = 0;
+	//__sync_lock_test_and_set(mutex->lock, 0); //release lock
 	tcb* TCBtemp;
 	queue* queuePtr = &MQueue;
-	//printf("unlock\n");
 	while((TCBtemp = (tcb*)dequeue(mutex->blockList)) != NULL) {
 		// Get queue corresponding to current thread's priority
 		TCBtemp->state = READY;
 		queuePtr = &MQueue;
 		//printf("queue:%d current:%d\n",queuePtr->priority,TCBcurrent->priority );
-		while(queuePtr->priority < TCBcurrent->priority){
+		while(TCBcurrent->priority > queuePtr->priority){
 			queuePtr = queuePtr->next;
 		}
 		// Enqueue at same level
 		enqueue(queuePtr, TCBtemp);
-	}
-	//printf("unlocked\n");
-	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
+	} 
+	
+	setitimer(ITIMER_REAL, &timer, NULL); //resume timer
 	
 	return 0;
 };
+
+
 
 /* destroy the mutex */
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
@@ -244,10 +240,7 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 	tcb* temp;
 	while((temp = (tcb*)dequeue(mutex->blockList)) != NULL); //destroy blocklist, doesn't set threads to ready
 	free(mutex->blockList);
-	return 0;
-};
-
-
+	retu
 /* scheduler */
 // Every time when timer interrupt happens, your thread library should 
 // be contexted switched from thread context to this schedule function
