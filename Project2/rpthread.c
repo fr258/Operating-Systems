@@ -75,7 +75,7 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 
 /* give CPU possession to other user-level threads voluntarily */
 int rpthread_yield() {
-	/// change thread state from Running to Ready
+	// change thread state from Running to Ready
 	// save context of this thread to its thread control block
 	// switch from thread context to scheduler context
 
@@ -124,7 +124,7 @@ void rpthread_exit(void *value_ptr) {
 	// IDK HOW TO DO THIS
 
 	// Should NOT be null already
-	if(TCBcurrent != NULL){
+	if(TCBcurrent == NULL){
 		swapcontext(dummyCon, schedCon);
 	}
 
@@ -247,16 +247,17 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 	// Decr number of threads joining desired thread after joined thread finishes/is freed (shouldn't be freed)
 	foundTCB->joins--;
 
-	// Free thread stuff if no more threads are joining it
+	// Pass on exit value
+	if(value_ptr != NULL){
+		*value_ptr = foundTCB->retVal;
+	}
+
+	// Free TCB if no more threads are joining it
 	if(foundTCB->joins == 0){
 		free(foundTCB);
 		foundTCB = NULL;
 	}
 	
-	// Pass on exit value
-	if(value_ptr != NULL){
-		*value_ptr = foundTCB->retVal;
-	}
 	return 0;
 }
 
@@ -630,3 +631,10 @@ void exitMain() {
 	free(schedCon);
 }
 
+void* test (void* arg){
+	int value = 6;
+	int* ret = &value;
+	printf("Thread print: %d\n", *ret);
+	return (void*) ret;
+	//rpthread_exit((void*)ret);
+}
