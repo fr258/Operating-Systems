@@ -26,9 +26,6 @@
 
 #define STACKSIZE 16834
 
-//remove later!
-//#define SCHED RR
-
 /* include lib header files that you need here: */
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -58,12 +55,9 @@ typedef struct threadControlBlock {
 
 /* mutex struct definition */
 typedef struct rpthread_mutex_t {
-	/* add something here */
 	int* lock;
 	rpthread_t locker;
 	struct Queue* blockList;
-	
-	// YOUR CODE HERE
 } rpthread_mutex_t;
 
 // TCB and extra fields to make linked lists
@@ -81,17 +75,6 @@ typedef struct Queue {
     struct Queue* next;
     int priority;
 } queue;
-
-typedef struct LinkedList {
-	node* head;
-} llist;
-
-
-
-
-
-
-
 
 /* Function Declarations: */
 
