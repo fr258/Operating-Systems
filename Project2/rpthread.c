@@ -45,7 +45,7 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 		init();
 	}
 
-	 //set up tcb to enqueue
+	//set up tcb to enqueue
 	tcb* TCBtemp = malloc(sizeof(tcb));
 	//set input function and args in tcb 
 	getcontext(&(TCBtemp->context));
@@ -62,20 +62,28 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 	makecontext(&TCBtemp->context, functionCaller, 0);
 
 	TCBtemp->threadId = ++maxThreadId;
+	
 	threadId[TCBtemp->threadId] = TCBtemp; //store thread tcb in array
 	*thread = TCBtemp->threadId; //set input val to set thread
 	enqueue(&MQueue, TCBtemp); //enqueue in level 1
 	
+//printf("tid make in create: %d\n", TCBtemp->threadId);
+
 	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
 
 	return 0;
 }
+
 
 /* give CPU possession to other user-level threads voluntarily */
 int rpthread_yield() {
 	/// change thread state from Running to Ready
 	// save context of this thread to its thread control block
 	// switch from thread context to scheduler context
+
+	// Stop timer and set TCB state
+	setitimer(ITIMER_REAL, &zeroTimer, NULL);
+	TCBcurrent->state = READY;
 
 	// Get queue corresponding to current thread's priority
 	queue* queuePtr = &MQueue;
@@ -85,27 +93,7 @@ int rpthread_yield() {
 	// Enqueue at same level
 	enqueue(queuePtr, TCBcurrent);
 
-	// else {
-	// 	//a dequeued thread would get lost here sadly
-	// 	//printf("thread terminated: %d\n", TCBcurrent->threadId);
-	// 	tempIds[TCBcurrent->threadId] = 0;  
-	// 	//^ REMOVE LATER!******************************************************
-	// }
-	
-	// setitimer(ITIMER_REAL, &zeroTimer, NULL);
-	
-	// TCBcurrent->state = READY;
-	
-	// if(TCBcurrent->priority==1)
-	// 	enqueue(&MQueue, temp);
-	// else if(TCBcurrent->priority==2)
-	// 	enqueue(MQueue.next, temp);
-	// else if(TCBcurrent->priority==3)
-	// 	enqueue(MQueue.next->next, temp);
-	// else
-	// 	enqueue(MQueue.next->next->next, temp);
-
-	// swapcontext(&TCBcurrent->context, schedCon);
+	swapcontext(&TCBcurrent->context, schedCon);
 
 	return 0;
 }
@@ -119,26 +107,28 @@ void rpthread_exit(void *value_ptr) {
 	// should clean up or change in the thread state and scheduler state when a thread is exiting.
 
 	// Stop timer - thread already exiting, no point in switching out now
-	// IDK HOW TO DO THIS
 	setitimer(ITIMER_REAL, &zeroTimer, NULL);
 
 	// Set thread's retVal if value_ptr != NULL - used later to be accessed by join
-	value_ptr = TCBcurrent->retVal;
+	if(value_ptr != NULL){
+		TCBcurrent->retVal = value_ptr;
+	}
+
 	int tempId = TCBcurrent->threadId;
 	
 	// Always frees context stack
 	free(TCBcurrent->context.uc_stack.ss_sp);
-	// TCBcurrent->context = NULL;
 
-	TCBcurrent->state = TERMINATED;
-	
+	// Free TCB and free up threadId slot if no threads are joining it
 	if(TCBcurrent->joins == 0) {
 		free(TCBcurrent);
+		threadId[tempId] = NULL;
+	}
+	else{
+		TCBcurrent->state = TERMINATED;
 	}
 	
-	threadId[tempId] = NULL;
-	
-
+	// Go to scheduler
 	setcontext(schedCon);
 }
 
@@ -146,18 +136,15 @@ void rpthread_exit(void *value_ptr) {
 /* Wait for thread termination */
 // Returns int value of 0 on success, -1 if thread not found
 int rpthread_join(rpthread_t thread, void **value_ptr) {
-	// wait for a specific thread to terminate
-	// de-allocate any dynamic memory created by the joining thread
-	// while(tempIds[thread]!=0); //testing only! tempIds won't exist later
-	// de-allocate any dynamic memory created by the joining thread - not sure how to do this
-	// Invalid thread id
-	//setitimer(ITIMER_REAL, &zeroTimer, NULL);
+
+	// Check for valid thread id
 	if(thread < 1 || thread >= 500){
 		return -1;
 	}
-	
+
+	// Get TCB corresponding with given thread
 	tcb *TCBtemp = threadId[thread];
-	
+
 	//thread not found
 	if(TCBtemp == NULL) {
 		return -1;
@@ -166,113 +153,22 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 		TCBtemp->joins++;
 	}
 	
-	while(TCBtemp->state != TERMINATED); //busy wait for thread to finish
-	
-	value_ptr = &TCBtemp->retVal;
+	//busy wait for thread to finish
+	while(TCBtemp->state != TERMINATED){
+		rpthread_yield();
+	}
 
+	// Pass through thread's exit value if value_ptr != NULL
+	if(value_ptr != NULL){
+		*value_ptr = TCBtemp->retVal;
+	}
 	
-
+	// Free TCB if no more threads are joining on it
 	if(TCBtemp->joins == 1)
 		free(TCBtemp);
 		
 	TCBtemp->joins--;
 
-	
-	
-/*
-	// Linearly search thru linked list of all created threads
-	// Can also just search thru all threads in scheduler - don't have to wait for a thread that's not running
-	// Assume 2d linked list scheduler since join has to work for both RR and MLFQ.
-
-	// Which queue to use - probably unnecessary if we decide to only use 1 queue for both RR And ML
-	queue* level = &MQueue;
-	node* temp = NULL;
-	tcb* foundTCB = NULL;
-	int found = 1;
-
-	// For each level in the queue, go thru each thread on that level
-	while(level != NULL && found){
-		// For each thread on current level
-		temp = level->head;
-		while(temp != NULL){
-			// Found thread with desired tid
-			if((temp->element != NULL) && (((tcb*)(temp->element))->threadId == thread)){
-				foundTCB = temp->element;
-
-				// Undefined behavior if more than 1 thread joins on a single thread
-				if(foundTCB->joins > 0){
-					return -1;
-				}
-
-				// Incr number of threads joining on desired thread to 1
-				foundTCB->joins++;
-
-				// Use found to break out of outer while loop
-				found = 0;
-				break;
-			}
-			temp = temp->next;
-		}
-		level = level->next;
-	}
-
-	// // If thread not found in scheduler, also go thru blocked thread list
-	// rpthread_mutex_t* mutexPtr;
-	// // Outer loop for each mutex
-	// while(mutexPtr != NULL && found){
-	// 	// Inner loop for each thread in the mutex's blocklist - reused code from above
-	// 	while(temp != NULL){
-	// 		// Found thread with desired tid
-	// 		if((temp->element != NULL) && ((tcb*)(temp->element)->threadId == thread)){
-	// 			foundTCB = temp->element;
-
-	// 			// Undefined behavior if more than 1 thread joins on a single thread
-	// 			if(foundTCB->joins > 0){
-	// 				return -1;
-	// 			}
-
-	// 			// Incr number of threads joining on desired thread to 1
-	// 			foundTCB->joins++;
-
-	// 			// Use found to break out of outer while loop
-	// 			found = 0;
-	// 			break;
-	// 		}
-	// 		temp = temp->next;
-	// 	}
-	// 	mutexPtr = mutexPtr->next;
-	// }
-
-	// Fail to find a thread with the desired tid in scheduler AND blocked list
-	if(foundTCB == NULL){
-		return -1;
-	}
-
-	// If tid found, loop until desired thread is terminated, at which point we are free to return
-	// think this works as a simplified version but not as readable
-	// while(foundTCB != NULL && foundTCB->state != TERMINATED)
-	while(1){
-		if(foundTCB == NULL || foundTCB->state == TERMINATED){
-			break;
-		}
-		// yielding might be needed here since not very efficient to waste time slice
-		// pthread_yield();
-	}
-
-	// Decr number of threads joining desired thread after joined thread finishes/is freed (shouldn't be freed)
-	foundTCB->joins--;
-
-	// Free thread stuff if no more threads are joining it
-	if(foundTCB->joins == 0){
-		free(foundTCB);
-		foundTCB = NULL;
-	}
-	
-	// Pass on exit value
-	if(value_ptr != NULL){
-		*value_ptr = foundTCB->retVal;
-	}
-	*/
 	return 0;
 }
 
@@ -342,8 +238,6 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	return 0;
 };
 
-
-
 /* destroy the mutex */
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 	// Deallocate dynamic memory created in rpthread_mutex_init
@@ -355,56 +249,21 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 
 
 /* scheduler */
+// Every time when timer interrupt happens, your thread library should 
+// be contexted switched from thread context to this schedule function
 static void schedule() {
-	// Every time when timer interrupt happens, your thread library 
-	// should be contexted switched from thread context to this 
-	// schedule function
 
-	// Invoke different actual scheduling algorithms
-	// according to policy (RR or MLFQ)
-
-	// if (sched == RR)
-	//		sched_rr();
-	// else if (sched == MLFQ)
-	// 		sched_mlfq();
-
-	// YOUR CODE HERE
-	//printf("in schedule\n");
-
-	// schedule policy
-	// #ifndef MLFQ
-	// 	//printf("round robin in schedule\n");
-	// 	sched_rr();
-	// 	//TCBcurrent = dequeue(RRqueue
-	// #else 
-	// 	// Choose MLFQ
-	// 	// CODE 2
-	// #endif
-	// 	//printf("in schedule\n");
-
-	// from RR
 	// Dequeue from highest non-empty priority queue 
 	queue* queuePtr = &MQueue;
 	tcb* temp = NULL;
+
 	// Keep dequeueing from ptr until a non-null tcb is returned
-	/*tcb* temp = (tcb*)dequeue(queuePtr);
-	while(queuePtr!=NULL && temp == NULL){
-		temp = (tcb*)dequeue(queuePtr);
-		queuePtr = queuePtr->next;
-	}*/
 	while(queuePtr != NULL) {
 		if((temp = dequeue(queuePtr)) != NULL)
 			break;
 		else
 			queuePtr = queuePtr->next; //check lower priority queue	
 	}
-
-	
-	// // Keep dequeueing next node until a non-blocked node is returned (obselete)
-	// while(temp != NULL && temp->state == BLOCKED) {
-	// 	enqueue(&RRqueue, temp); //return blocked context to queue
-	// 	temp = (tcb*)dequeue(&RRqueue); //try next context in list
-	// }
 
 	// Would only happen when there are no threads in the queue
 	if(temp == NULL) {
@@ -466,6 +325,7 @@ void functionCaller() {
 	//printf("caller: %d\n", TCBcurrent->threadId);
 	TCBcurrent->retVal = TCBcurrent->function(TCBcurrent->input);
 	TCBcurrent->state = TERMINATED;
+	rpthread_exit(NULL);
 	setitimer(ITIMER_REAL, &zeroTimer, NULL); //pause timer, returning to scheduler
 }
 
@@ -553,8 +413,6 @@ int init() {
 }
 
 
-
-
 void exitMain() {
 	//stop timer
 	setitimer(ITIMER_REAL, &zeroTimer, NULL); 
@@ -589,13 +447,3 @@ void exitMain() {
 	free(schedCon->uc_stack.ss_sp); 
 	free(schedCon); 
 }
-
-
-
-
-
-
-
-
-
-
