@@ -237,7 +237,8 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 	tcb* temp;
 	while((temp = (tcb*)dequeue(mutex->blockList)) != NULL); //destroy blocklist, doesn't set threads to ready
 	free(mutex->blockList);
-	retu
+	return 0;
+};
 /* scheduler */
 // Every time when timer interrupt happens, your thread library should 
 // be contexted switched from thread context to this schedule function
