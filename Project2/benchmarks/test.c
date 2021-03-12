@@ -18,7 +18,7 @@ void* test (void* arg){
 	int* ret = malloc(sizeof(int));
 	*ret = value;
 
-	printf("Thread print: %d\n", *ret);
+	printf("Thread res: %d\n", *ret);
 	printf("Thread addy: %p\n", ret);
 	//return (void*) ret;
 	rpthread_exit((void*)ret);
@@ -29,17 +29,23 @@ int main(int argc, char **argv) {
 	//struct pthread *pd = (struct pthread *) threadid;
 	int x = 4;
 	int* res = &x;
+	rpthread_t* thread;
 	
+	printf("Main res: %d\n", *res);
 	printf("Main addy: %p\n", res);
-	rpthread_t thread;
-	printf("Main res: %d\n", *res);
 
-	rpthread_create(&thread, NULL, test, NULL);
-	printf("Main res: %d\n", *res);
-
+	rpthread_create(thread, NULL, test, NULL);
+	int run1=0, run2=0;
+	while(run1<10000000){
+		while(run2<100000000){
+			run2++;
+		}
+		run1++;
+	}
 	rpthread_join(thread, (void**) &res);
 
 	printf("Main res: %d\n", *res);
+	printf("Main addy: %p\n", res);
 	//free(res);
 	return 0;
 }
