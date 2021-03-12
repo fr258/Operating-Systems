@@ -57,7 +57,6 @@ int rpthread_create(rpthread_t * thread, pthread_attr_t * attr, void *(*function
 	*thread = TCBtemp->threadId; //set input val to set thread
 	enqueue(&MQueue, TCBtemp); //enqueue in level 1
 	
-//printf("tid make in create: %d\n", TCBtemp->threadId);
 
 	setitimer(ITIMER_REAL, &tempTimer, NULL); //resume timer
 
@@ -185,7 +184,6 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 		setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //disarm timer for enqueueing
 		getcontext(&TCBcurrent->context);
 		if(*(mutex->lock) == 1) { //lock not acquired
-			//printf("lock not acquired\n");
 			TCBcurrent->state = BLOCKED;
 			enqueue(mutex->blockList, TCBcurrent);
 			setcontext(schedCon);
@@ -206,13 +204,12 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
 
-	//if(mutex->locker != TCBcurrent->threadId) //nonlocking thread is attempting to free
-	//	return -1;
+
 		
 	setitimer(ITIMER_REAL, &zeroTimer, &tempTimer); //pause timer
-	
+	if(mutex->locker != TCBcurrent->threadId) //nonlocking thread is attempting to free
+		return -1;
 	*(mutex->lock) = 0;
-	//__sync_lock_test_and_set(mutex->lock, 0); //release lock
 	tcb* TCBtemp;
 	queue* queuePtr = &MQueue;
 	while((TCBtemp = (tcb*)dequeue(mutex->blockList)) != NULL) {
@@ -262,7 +259,6 @@ static void schedule() {
 	if(temp == NULL) {
 		return; //see if this breaks anything?
 	}
-	//printf("wasn't null\n");
 	TCBcurrent = temp;
 	
 	TCBcurrent->state = RUNNING;
@@ -274,7 +270,6 @@ static void schedule() {
 void enqueue(queue* inQueue, void* inElement) {
 	//is queue empty?
 	if(inQueue->head != NULL) {
-		//printf("enqueue with old head\n");
 		node* temp = malloc(sizeof(node));
 		temp->element = inElement;
 		temp->next = NULL;
@@ -284,23 +279,15 @@ void enqueue(queue* inQueue, void* inElement) {
 	}
 	//at least one element exists in queue
 	else {
-		//printf("enqueue with new head\n");
 		inQueue->head = malloc(sizeof(node));
 		inQueue->tail = inQueue->head;
 		inQueue->head->element = inElement;
 		inQueue->head->next = NULL;
 		inQueue->head->prev = NULL;
-		//remove below later
-		/*if(inQueue->head == RRqueue.head)
-			printf("successfully modified rr queue\n");
-		else {
-			printf("inqueue head is %p but rr head is %p\n", inQueue->head, RRqueue.head);
-		}*/
 	}
 }
 
 void* dequeue(queue *inQueue) {
-	//printf("in dequeue\n");
 	if(inQueue->head != NULL) {
 		void* temp = inQueue->head->element;
 		node* tempNode = inQueue->head;
@@ -315,7 +302,6 @@ void* dequeue(queue *inQueue) {
 
 void functionCaller() {
 	//call thread input function
-	//printf("caller: %d\n", TCBcurrent->threadId);
 	TCBcurrent->retVal = TCBcurrent->function(TCBcurrent->input);
 	TCBcurrent->state = TERMINATED;
 	rpthread_exit(NULL);
@@ -323,7 +309,6 @@ void functionCaller() {
 }
 
 void sigHandler(int signum) {
-	//printf("caught signal: %d\n", TCBcurrent->threadId);
 	// Enqueue in next level - for RR and ML last queue, next level is current level
 	queue* queuePtr = &MQueue;
 	int counter = 1;
