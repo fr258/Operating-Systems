@@ -1,0 +1,18 @@
+testplan.txt
+
+Custom workload 1: testing mymalloc
+This workload will allocate a block of memory and immediately free it, starting at size (4094-120) and incrementing by 1 until failure.
+This is intended to demonstrate that mymalloc will refuse to allocate any more than 4094 bytes of data.
+This shows that it the method will reserve space for metadata (of size 2 bytes) when mymalloc is called for a given size of user data.
+This workload will run 50 times.
+
+Custom workload 2: testing myfree
+This workload will first allocate a block of user data of size 30 (so 32 bytes in the array with metadata included).
+It will repeatedly allocate such blocks until memory is exhausted (4096 is neatly divisible into blocks of size 32).
+Next, every other block will be freed, leaving the array with a pattern of one free and one occupied block for the whole array.
+It will then free the first occupied block. Accordingly, we will call mymalloc for a block of size 30*3 + 4.
+If this call succeeds it will demonstrate that the prior myfree call properly coalesced the 3 consecutive free blocks into one.
+It will additionally demonstrate that 4 bytes that were previously reserved for metadata are now also considered free for usage.
+This larger block will be freed, followed by freeing another size 30 block, and calling mymalloc again on a larger block meant to represent 5 consecutive 30-byte blocks.
+In general, we will repeat with the call being 30*n + (2*(n-1)) for every freeing of a size 30 block to demonstrate how free nodes are coalesced together (as well as previously reserved metadata bytes).
+This workload will run 50 times.
