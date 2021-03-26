@@ -1,17 +1,41 @@
 #include "my_vm.h"
 
+
+void* vMap = NULL;
+void* pMap = NULL;
+void* pageDir = NULL;
+void* totalMem = NULL;
+
+int init = 0;
+
 /*
 Function responsible for allocating and setting your physical memory 
 */
 void set_physical_mem() {
+    if(init){
+        return;
+    }
+    init = 0;
 
     //Allocate physical memory using mmap or malloc; this is the total size of
     //your memory you are simulating
 
-    
+    totalMem = (void*)malloc(MAX_MEMSIZE);
+
     //HINT: Also calculate the number of physical and virtual pages and allocate
     //virtual and physical bitmaps and initialize them
+    
+    // CEIL OR FLOOR FOR DIVISION???
+    int numPages = MEMSIZE / PGSIZE;
 
+    vMap = (void*)malloc(numPages);
+    pMap = (void*)malloc(numPages);
+
+    memset(vMap, 0, numPages);
+    memset(pMap, 0, numPages);
+
+    // Figure out the math later - 1024 for 4kb
+    pageDir = (void*)malloc(1024);
 }
 
 
