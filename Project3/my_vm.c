@@ -94,14 +94,34 @@ as an argument, and sets a page table entry. This function will walk the page
 directory to see if there is an existing mapping for a virtual address. If the
 virtual address is not present, then a new entry will be added
 */
-int
-page_map(pde_t *pgdir, void *va, void *pa)
+int page_map(pde_t *pgdir, void *va, void *pa)
 {
 
     /*HINT: Similar to translate(), find the page directory (1st level)
     and page table (2nd-level) indices. If no mapping exists, set the
     virtual to physical mapping */
-
+	
+	int currPDIndex = va >> (32 - dirBits); //extract directory bits to get PD index
+	
+	int currPTIndex = (va >> (32 - pageBits)) & (2^pageBits - 1); //extract page bits to get PT index
+	
+	int vMapEntry = currPDIndex * (2^pageBits - 1) + currPTIndex;
+	int vMapOffset = vMapEntry % 8;
+	
+	if(0 == (*(vMap + (vMapEntry / 8)) >> vMapOffset)) {
+	
+		pte_t *currPTEntry = *(pgdir + currPDIndex) + currPTIndex;
+		
+		if(*currPTEntry == 0) {
+			currPTEntry = pa;
+			
+			*(vMap + (vMapEntry / 8)) |= 1 << vMapOffset;
+			
+			return 0;
+		}
+		
+	}
+	
     return -1;
 }
 
