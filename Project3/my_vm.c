@@ -1,5 +1,5 @@
 #include "my_vm.h"
-#include "math.h"
+
 
 void* vMap = NULL;
 void* pMap = NULL;
@@ -10,6 +10,8 @@ int numPages;
 int offsetBits;
 int pageBits;
 int dirBits;
+
+int TLBsize;
 
 /*
 Function responsible for allocating and setting your physical memory 
@@ -61,9 +63,28 @@ pte_t *translate(pde_t *pgdir, void *va) {
     * translation exists, then you can return physical address from the TLB.
     */
 
+    unsigned long virAdd = (long)va;
+    unsigned long virAddOffset = (virAdd<<(dirBits+pageBits)) >> (dirBits+pageBits);
 
-    //If translation not successfull
-    return NULL; 
+    // Page directory index
+    unsigned long pageDirIndex = virAdd >> (offsetBits+pageBits);
+    // Page table index
+    unsigned long pageTabIndex = (virAdd<<dirBits) >> (pageBits + offsetBits);
+
+    // Check page directory
+    unsigned char *pgByte = (char*)pageDir + pageDirIndex;
+    // Page directory index DNE
+    if(!(*pgByte & (1 << pageDirIndex))){
+        return NULL;
+    }
+
+    // Check page table
+    pde_t *pdEntry = pgdir + pageDirIndex;
+
+    pte_t *ptEntry = (pte_t*)((*pdEntry >> offsetBits) * PGSIZE) + virAddOffset;
+
+    // Successful
+    return (pte_t*)(*ptEntry + virAddOffset);
 }
 
 
@@ -171,8 +192,20 @@ void mat_mult(void *mat1, void *mat2, int size, void *answer) {
      * getting the values from two matrices, you will perform multiplication and 
      * store the result to the "answer array"
      */
+    int i, j, k, sum;
+    int *mat1Val, *mat2Val, *ansVal;
 
-       
+    for(i = 0; i < size; i++){
+        for(j = 0; j < size; j++){
+            *ansVal = 0;
+            for(k = 0; k < size; k++){
+                get_value((int*)mat1 + (i*size) + k, (void*)mat1Val, sizeof(int));
+                get_value((int*)mat2 + (k*size) + j, (void*)mat2Val, sizeof(int));
+                *ansVal = *mat1Val * *mat2Val;
+            }
+            put_value((int*)answer + (i*size) + j, (void*)ansVal, sizeof(int));
+        }
+    }
 }
 
 
