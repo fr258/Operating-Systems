@@ -13,11 +13,12 @@ int dirBits;
 
 int TLBsize;
 
+int init = 0;
+
 /*
 Function responsible for allocating and setting your physical memory 
 */
 void set_physical_mem() {
-    static int init = 0;
     if(init){
         return;
     }
@@ -81,7 +82,7 @@ pte_t *translate(pde_t *pgdir, void *va) {
     // Check page table
     pde_t *pdEntry = pgdir + pageDirIndex;
 
-    pte_t *ptEntry = (pte_t*)((*pdEntry >> offsetBits) * PGSIZE) + virAddOffset;
+    pte_t *ptEntry = (pte_t*)((*pdEntry >> offsetBits) * PGSIZE) + pageTabIndex;
 
     // Successful
     return (pte_t*)(*ptEntry + virAddOffset);
@@ -131,6 +132,7 @@ int page_map(pde_t *pgdir, void *va, void *pa)
 void *get_next_avail(int num_pages) {
  
     //Use virtual address bitmap to find the next free page
+
 }
 
 
@@ -142,6 +144,9 @@ void *a_malloc(unsigned int num_bytes) {
     /* 
      * HINT: If the physical memory is not yet initialized, then allocate and initialize.
      */
+    if(!init){
+        set_physical_mem();
+    }
 
    /* 
     * HINT: If the page directory is not initialized, then initialize the
@@ -179,9 +184,32 @@ void put_value(void *va, void *val, int size) {
      * function.
      */
 
+    long startAdd = (long)va;
+    long endAdd = ((long)va + size);
+
+    long startOffset = startAdd >> offsetBits;
+    long endOffset = endAdd >> offsetBits;
 
 
+    int i;
+    char *byte;
 
+    // Make sure this is a valid region of virtual memory
+    // WIP
+    for(i = startAdd; i < endOffset; i++){
+        byte = (char*)vMap + i;
+
+    }
+    
+    // Makes the copy from val to va
+    int i;
+    void* physAdd, *va2;
+    for(i = 0; i < size; i++){
+        va2 = startAdd + i;
+        physAdd = translate(pageDir, va2);
+        *(char*)physAdd = *(char*)val;
+        val = (char*)val + 1;
+    }
 }
 
 
@@ -192,9 +220,21 @@ void get_value(void *va, void *val, int size) {
     * "val" address. Assume you can access "val" directly by derefencing them.
     */
 
+    long startAdd = (long)va;
+    // long endAdd = ((long)va + size);
 
+    // long startOffset = startAdd >> offsetBits;
+    // long endOffset = endAdd >> offsetBits;
 
-
+    // Makes the copy from va to val
+    int i;
+    void* physAdd, *va2;
+    for(i = 0; i < size; i++){
+        va2 = startAdd + i;
+        physAdd = translate(pageDir, va2);
+        *(char*)val = *(char*)physAdd;
+        val = (char*)val + 1;
+    }
 }
 
 
