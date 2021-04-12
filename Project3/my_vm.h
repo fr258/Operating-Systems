@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
+#include <pthread.h>
 
 //Assume the address space is 32 bits, so the max memory size is 4GB
 //Page size is 4KB
@@ -60,6 +61,8 @@ void a_free(void *va, int size);
 void put_value(void *va, void *val, int size);
 void get_value(void *va, void *val, int size);
 void mat_mult(void *mat1, void *mat2, int size, void *answer);
+pte_t *check_TLB(void *va);
+int add_TLB(void *va, void *pa);
 void print_TLB_missrate();
 
 #endif

@@ -45,10 +45,10 @@ void set_physical_mem() {
 	memset(pMap, 0, numPTE/8);
 
     // TLB init
-    tlb_store.entries = malloc(sizeof(struct tlbEntry*) * TLB_ENTRIES);
+    tlb_store.entries = (struct tlbEntry**)malloc(sizeof(struct tlbEntry*) * TLB_ENTRIES);
     int i;
     for(i = 0; i < TLB_ENTRIES; i++){
-        tlb_store.entries[i] = malloc(sizeof(struct tlbEntry));
+        tlb_store.entries[i] = (struct tlbEntry*)malloc(sizeof(struct tlbEntry));
     }
 }
 
@@ -69,26 +69,46 @@ pte_t *translate(pde_t *pgdir, void *va) {
     unsigned long virAdd = (unsigned long)va;
     unsigned long virAddOffset = (virAdd<<(dirBits+pageBits)) >> (dirBits+pageBits);
 
+    // Check TLB - sequential search TLB (no hashing)
+    unsigned long tlbIndex;
+    totalCalls++;
+    for(tlbIndex = 0; tlbIndex < TLB_ENTRIES; tlbIndex++){
+        if(tlb_store.entries[tlbIndex] != NULL && tlb_store.entries[tlbIndex]->va == virAdd){
+            return (pte_t*)tlb_store.entries[tlbIndex]->pa;
+        }
+    }
+    missCount++;
+
+    // Check if address exists in virtual map
+    char* byte = vMap + (virAdd >> offsetBits) / 8;
+    unsigned long offset = (virAdd >> offsetBits) % 8;
+    if(!(*byte & (1 << offset))){
+        return NULL;
+    }
+
     // Page directory index
     unsigned long pageDirIndex = virAdd >> (offsetBits+pageBits);
     // Page table index
-    unsigned long pageTabIndex = (virAdd<<dirBits) >> (pageBits + offsetBits);
+    unsigned long pageTabIndex = (virAdd<<dirBits) >> (dirBits + offsetBits);
 
     // Check page directory
     unsigned char *pgByte = pageDir + pageDirIndex;
     // Page directory index DNE
-    if(!(*pgByte & (1 << pageDirIndex))){
+    if(!(*pgByte & (1 << pageDirIndex % 8))){
         return NULL;
     }
 
     // Check page table
     pde_t *pdEntry = pgdir + pageDirIndex;
 
-    pte_t *ptEntry = (pte_t*)((*pdEntry >> offsetBits) * PGSIZE) + pageTabIndex;
-	//pte_t *ptEntry = (pte_t*)(*pdEntry) + pageTabIndex; ??
+	pte_t *ptEntry = (pte_t*)((*pdEntry) + pageTabIndex);
+
+    char* physAdd = (char*)(*ptEntry + virAddOffset);
+    // Add new pairing to TLB
+    add_TLB(va, physAdd);
 
     // Successful
-    return (pte_t*)(*ptEntry + virAddOffset);
+    return (pte_t*)physAdd;
 }
 
 
@@ -224,7 +244,7 @@ void *a_malloc(unsigned int num_bytes) {
 			*temp |= 1 << (7-(next.PHYS[i] % 8));
 		}
         pthread_mutex_unlock(&mutex);
-		return VA;
+		return (void*)VA;
 	}
     pthread_mutex_unlock(&mutex);
     return NULL;
@@ -271,8 +291,8 @@ void a_free(void *va, int size) {
      */
     
     if(tlb_store.entries[index] != NULL && tlb_store.entries[index]->va == startAdd){
-        tlb_store.entries[index]->pa = NULL;
-        tlb_store.entries[index]->va = NULL;
+        tlb_store.entries[index]->pa = (unsigned long)NULL;
+        tlb_store.entries[index]->va = (unsigned long)NULL;
     }
     pthread_mutex_unlock(&mutex);
 }
@@ -410,16 +430,16 @@ add_TLB(void *va, void *pa)
 	if(size < TLB_ENTRIES) {
 		int i = 0;
 		while(i < TLB_ENTRIES) {
-			if(tlb_store.entries[i].virtual_address == 0) {
-				tlb_store.entries[i].virtual_address = (unsigned long)va;
-				tlb_store.entries[i].physical_address = (unsigned long)pa;
+			if(tlb_store.entries[i]->va == 0) {
+				tlb_store.entries[i]->va = (unsigned long)va;
+				tlb_store.entries[i]->pa = (unsigned long)pa;
 				size++;
 			}
 		}
 	}
 	else {
-		tlb_store.entries[oldestEntry].virtual_address = (unsigned long)va;
-		tlb_store.entries[oldestEntry].physical_address = (unsigned long)pa;
+		tlb_store.entries[oldestEntry]->va = (unsigned long)va;
+		tlb_store.entries[oldestEntry]->pa = (unsigned long)pa;
 		oldestEntry = (++oldestEntry)%TLB_ENTRIES;
 	}
     return 1;
@@ -434,8 +454,8 @@ pte_t *
 check_TLB(void *va) {
 	totalCalls++;
     for(int i = 0; i < TLB_ENTRIES; i++) {
-		if(tlb_store.entries[i].virtual_address == (unsigned long)va) {
-			return (pte_t*)tlb_store.entries[i].physical_address;
+		if(tlb_store.entries[i]->va == (unsigned long)va) {
+			return (pte_t*)tlb_store.entries[i]->pa;
 		}
 	}
 	missCount++;
