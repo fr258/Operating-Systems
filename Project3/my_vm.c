@@ -121,7 +121,6 @@ pte_t *translate(pde_t *pgdir, void *va) {
     // Successful
     return (pte_t*)(*ptEntry + virAddOffset);
 }
-
 /*
 The function takes a page directory address, virtual address, physical address
 as an argument, and sets a page table entry. This function will walk the page
@@ -155,14 +154,18 @@ int page_map(pde_t *pgdir, void *va, void *pa)
 	return 1;
 }
 
+
 /*Function that gets the next available page
 */
 void *get_next_avail(int num_pages) {
-	int firstEntry = -1;
-	int currEntry = vMap;
+	unsigned int firstEntry = -1;
+	unsigned int firstPDE = -1;
+	char currEntry = *vMap;
 	int pageCount = 0;
-	for(int currPDE = 0; currPDE < numPDE; currPDE++) {
-		for(int currPTE = 0; currPTE < entriesPerPT; currPTE++) {
+	nextContent *retVal = malloc(sizeof(nextContent));
+	//traverse virtual bitmap
+	for(unsigned long currPDE = 0; currPDE < numPDE; currPDE++) {
+		for(unsigned long currPTE = 0; currPTE < entriesPerPT; currPTE++) {
 			if((currEntry & 0x80) == 1) {
 				pageCount = 0; 
 				firstEntry = -1;
@@ -171,12 +174,26 @@ void *get_next_avail(int num_pages) {
 				pageCount++;
 				if(firstEntry == -1) {
 					firstEntry = currPTE;
+					firsPDE = currPDE;
 				}
+				//traverse physical bitmap
 				if(pageCount == num_pages) {
-					retVal->PDE = currPDE;
-					retVal->PTE = currPTE;
-					retVal->PHYS = totalMem + currPDE * entriesPerPT + currPTE;
-					return retVal;
+					pageCount = 0; //now counting physical pages
+					char currEntryP = *pMap;
+					unsigned long *pIndex = malloc(sizeof(unsigned long) * num_pages); //holds indices of physical pages found
+					for(unsigned long currPHYE = 0; currPHYE < numPTE; currPHYE++) {
+						if((currEntryP & 0x80) == 0) {
+							pIndex[pageCount] = currPHYE;
+							pageCount++;
+						}
+						if(pageCount == num_pages) {
+							retVal->PDE = firstPDE;
+							retVal->PTE = firstEntry;
+							retVal->PHYS = pIndex;
+							return retVal;
+						}
+						currEntryP >>= 1;
+					}
 				}
 			}
 			currEntry >>= 1;
@@ -190,43 +207,43 @@ void *get_next_avail(int num_pages) {
 and used by the benchmark
 */
 void *a_malloc(unsigned int num_bytes) {
-
     /* 
      * HINT: If the physical memory is not yet initialized, then allocate and initialize.
      */
     if(!init){
         set_physical_mem();
     }
-
    /* 
     * HINT: If the page directory is not initialized, then initialize the
     * page directory. Next, using get_next_avail(), check if there are free pages. If
     * free pages are available, set the bitmaps and map a new page. Note, you will 
     * have to mark which physical pages are used. 
     */
+	unsigned int numPages = num_bytes / PGSIZE;
+	if(num_bytes % PGSIZE != 0) numPages++; //round up
 	
-	int numPages = (int)ceil((long double)num_bytes / PGSIZE);
 	nextContent next = *(nextContent*)get_next_avail(numPages);
 	
 	//there are enough free pages
-	if(next.PTE != NULL) {
+	if(next.PDE != NULL) {
 		unsigned long VA = 0;
+		unsigned long baseVA = 0;
 		
-		VA |= next.PDE << (32 - dirBits); //set PD bits
-		VA |= next.PTE << (32 - dirBits - pageBits); //set PT bits
+		baseVA |= next.PDE << (32 - dirBits); //set PD bits 
 		
-		if(page_map(pageDir, &VA, next.PHYS)!=-1) {
-			//(num page tables before current * entries per table + number of entries from start of current table) / 8 bits/byte
-			int totalBits = next.PDE * entriesPerPT + next.PTE;
+		for(int i = 0; i < numPages; i++) {
+			VA |= next.PTE+i << (offsetBits); //set PT bits
 			
-			//settingbitmap bit to true
-			*(vMap + VbitmapBytes) |= 1 << VbitmapBit;
-			for(unsigned long i = vMap + totalBits, j = 0, k = pMap + totalBits; j < numPages; i >>=1, j++, k >>= 1) {
-				i |= 0x80;
-			}
-			
-			return VA;
+			//map physical to virtual
+			page_map(pageDir, &VA, totalMem + next.PHYS[i]*4);
+			//set virtual bitmap
+			char *temp = vMap + next.PTE + i;
+			*temp |= 1 << (7 - ((next.PTE+i) % 8));
+			//set physical bitmap
+			temp = pMap + next.PHYS[i];
+			*temp |= 1 << (7-(next.PHYS[i] % 8));
 		}
+		return VA;
 	}
     return NULL;
 }
