@@ -100,25 +100,37 @@ virtual address is not present, then a new entry will be added
 */
 int page_map(pde_t *pgdir, void *va, void *pa)
 {
+//	printf("offset bits are %d\n", offsetBits);
+	//printf("PT bits are %d\n", pageBits);
+//	printf("PD bits are %d\n", dirBits);
+//	printf("each table has %d entries\n", entriesPerPT);
+//	printf("there are %d PDE\n", (int)numPDE);
     /*HINT: Similar to translate(), find the page directory (1st level)
     and page table (2nd-level) indices. If no mapping exists, set the
     virtual to physical mapping */
-	int currPDE = (*(char*)va) >> (32 - dirBits);
-	int currPTE = ((*(char*)va) >> offsetBits) & (pow(2, pageBits)-1);
+	unsigned long currPDE = (*(unsigned long*)va) >> (32 - dirBits);
+	//printf("current PDE is %d\n", currPDE);
+	unsigned long currPTE = ((*(unsigned long*)va) >> offsetBits) & (unsigned long)(pow(2, pageBits)-1);
+	//printf("current PTE is %d\n", currPTE);
 	//beginning of current PT
 	char* PDEaddress = pageDir + (numPDE * 4) + (currPDE * entriesPerPT) * 4; //4 bytes per entry
+	//printf("beginning of current PT     is %lu\n", (unsigned long)PDEaddress);
+	//printf("beginning of page directory is %lu\n", (unsigned long)pageDir);
 
 	int mappingExists = 0;
 	for(int i = 0; i < numPDE; i++) {
 		if(*(pageDir + i*4) != 0) {//current PDE entry has mapping
-			if(*(pageDir + i*4) == PDEaddress) {
+		//printf("in here, it's %lu\n", *(unsigned long*)(pageDir + i*4));
+			if(*(unsigned long*)(pageDir + i*4) == PDEaddress) {
 				mappingExists = 1;
+				//printf("mapping exists\n");
 				break;
 			}
 		}
 	}
 	if(!mappingExists) {
-		*(pageDir + currPDE*4) = PDEaddress;
+		//printf("mapping doesn't exist\n");
+		*(unsigned long*)(pageDir + currPDE*4) = PDEaddress;
 
 	}
 	*(char*)(PDEaddress + 4*currPTE) = pa;
