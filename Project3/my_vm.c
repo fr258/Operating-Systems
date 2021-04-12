@@ -100,38 +100,24 @@ virtual address is not present, then a new entry will be added
 */
 int page_map(pde_t *pgdir, void *va, void *pa)
 {
-//	printf("offset bits are %d\n", offsetBits);
-	//printf("PT bits are %d\n", pageBits);
-//	printf("PD bits are %d\n", dirBits);
-//	printf("each table has %d entries\n", entriesPerPT);
-//	printf("there are %d PDE\n", (int)numPDE);
     /*HINT: Similar to translate(), find the page directory (1st level)
     and page table (2nd-level) indices. If no mapping exists, set the
     virtual to physical mapping */
-	unsigned long currPDE = (*(unsigned long*)va) >> (32 - dirBits);
-	//printf("current PDE is %d\n", currPDE);
-	unsigned long currPTE = ((*(unsigned long*)va) >> offsetBits) & (unsigned long)(pow(2, pageBits)-1);
-	//printf("current PTE is %d\n", currPTE);
+	unsigned long currPDE = ((unsigned long)va) >> (32 - dirBits);
+	unsigned long currPTE = (((unsigned long)va) >> offsetBits) & (unsigned long)(pow(2, pageBits)-1);
 	//beginning of current PT
 	char* PDEaddress = pageDir + (numPDE * 4) + (currPDE * entriesPerPT) * 4; //4 bytes per entry
-	//printf("beginning of current PT     is %lu\n", (unsigned long)PDEaddress);
-	//printf("beginning of page directory is %lu\n", (unsigned long)pageDir);
-
 	int mappingExists = 0;
 	for(int i = 0; i < numPDE; i++) {
 		if(*(pageDir + i*4) != 0) {//current PDE entry has mapping
-		//printf("in here, it's %lu\n", *(unsigned long*)(pageDir + i*4));
 			if(*(unsigned long*)(pageDir + i*4) == PDEaddress) {
 				mappingExists = 1;
-				//printf("mapping exists\n");
 				break;
 			}
 		}
 	}
 	if(!mappingExists) {
-		//printf("mapping doesn't exist\n");
 		*(unsigned long*)(pageDir + currPDE*4) = PDEaddress;
-
 	}
 	*(char*)(PDEaddress + 4*currPTE) = pa;
 	return 1;
@@ -143,56 +129,63 @@ int page_map(pde_t *pgdir, void *va, void *pa)
 void *get_next_avail(int num_pages) {
 	unsigned int firstEntry = -1;
 	unsigned int firstPDE = -1;
-	char currEntry = *vMap;
+	char current;
 	int pageCount = 0;
 	nextContent *retVal = malloc(sizeof(nextContent));
+	
 	//traverse virtual bitmap
-	for(unsigned long currPDE = 0; currPDE < numPDE; currPDE++) {
-		for(unsigned long currPTE = 0; currPTE < entriesPerPT; currPTE++) {
-			if((currEntry & 0x80) == 1) {
-				pageCount = 0;
+	for(unsigned long currByte = 0; currByte < numPTE/8; currByte++) {
+		for(int i = 0; i < 8; i++) {
+			current = *(char*)(vMap+currByte);
+			current <<= i;
+			current >>= 7;
+			
+			if(current&1 == 1) {
 				firstEntry = -1;
+				pageCount = 0;
 			}
 			else {
 				pageCount++;
 				if(firstEntry == -1) {
-					firstEntry = currPTE;
-					firstPDE = currPDE;
+					firstEntry = currByte + i;
 				}
-				//traverse physical bitmap
 				if(pageCount == num_pages) {
-					pageCount = 0; //now counting physical pages
-					char currEntryP = *pMap;
-					unsigned long *pIndex = malloc(sizeof(unsigned long) * num_pages); //holds indices of physical pages found
-					for(unsigned long currPHYE = 0; currPHYE < numPTE; currPHYE++) {
-						if((currEntryP & 0x80) == 0) {
-							pIndex[pageCount] = currPHYE;
-							pageCount++;
+					unsigned long *PHYS = malloc(sizeof(unsigned long) * num_pages);
+					//traverse physical bitmap
+					pageCount = 0;
+					for(unsigned long PcurrByte = 0; PcurrByte < numPTE/8; PcurrByte++) {
+						for(int j = 0; j < 8; j++) {
+							current = *(char*)(pMap+PcurrByte);
+							current <<= j;
+							current >>= 7;
+							
+							if((char)(current&1) == (char)0) {
+								PHYS[pageCount] = PcurrByte + j;
+								pageCount++;
+							}
+							if(pageCount == num_pages) {
+								retVal->PTE = firstEntry;
+								retVal->PHYS = PHYS;
+								return retVal;
+							}
 						}
-						if(pageCount == num_pages) {
-							retVal->PDE = firstPDE;
-							retVal->PTE = firstEntry;
-							retVal->PHYS = pIndex;
-							return retVal;
-						}
-						currEntryP >>= 1;
 					}
+					free(PHYS);
+					retVal->PTE = -1;
+					return retVal;
 				}
 			}
-			currEntry >>= 1;
 		}
 	}
-	retVal->PDE = NULL;
+	retVal->PTE = -1;
 	return retVal;
 }
 
-/* Function responsible for allocating pages
-and used by the benchmark
-*/
 void *a_malloc(unsigned int num_bytes) {
-    pthread_mutex_lock(&mutex);
-    
-    // If the physical memory is not yet initialized, then allocate and initialize.
+    /*
+     * HINT: If the physical memory is not yet initialized, then allocate and initialize.
+     */
+	pthread_mutex_lock(&mutex);
     if(!init){
         set_physical_mem();
     }
@@ -202,23 +195,26 @@ void *a_malloc(unsigned int num_bytes) {
     * free pages are available, set the bitmaps and map a new page. Note, you will
     * have to mark which physical pages are used.
     */
-	unsigned int numPages = num_bytes / PGSIZE;
+	unsigned long numPages = num_bytes / PGSIZE;
 	if(num_bytes % PGSIZE != 0) numPages++; //round up
-
+	
 	nextContent next = *(nextContent*)get_next_avail(numPages);
 
+
 	//there are enough free pages
-	if(next.PDE != NULL) {
+	if(next.PTE != -1) {
+		printf("returned valid\n");
 		unsigned long VA = 0;
 
+		unsigned long PDE = next.PTE/entriesPerPT;
+		int PTE = next.PTE%entriesPerPT;
 
-
-		int PDE = next.PDE;
-		int PTE = next.PTE;
-
+		char VbitTracker = next.PTE % 8;
+		
 		for(int i = 0; i < numPages; i++) {
 			VA = 0;
-			PTE = PTE + i;
+			PTE++;
+			
 			if(PTE > entriesPerPT) {
 				PTE = 0;
 				PDE++;
@@ -227,19 +223,20 @@ void *a_malloc(unsigned int num_bytes) {
 			VA |= PTE << (offsetBits); //set PT bits
 
 			//map physical to virtual
-			page_map(pageDir, &VA, totalMem + next.PHYS[i]*4);
+			page_map(pageDir, (void*)VA, totalMem + next.PHYS[i]*4);
+
 			//set virtual bitmap
-			char *temp = vMap + (PDE*entriesPerPT) + PTE;
-			*temp |= 1 << (7 - (PTE % 8));
-			//set physical bitmap
-			temp = pMap + next.PHYS[i];
-			*temp |= 1 << (7-(next.PHYS[i] % 8));
+			vMap[(next.PTE+i)/8] |= (1 << VbitTracker);
+			
+			pMap[next.PHYS[i]/8] |= (1 << (7-next.PHYS[i]%8));
+			
+			VbitTracker = (VbitTracker+1) % 8;
 		}
         pthread_mutex_unlock(&mutex);
 		return VA;
 	}
     pthread_mutex_unlock(&mutex);
-    return NULL;
+    return -1;
 }
 
 /* Responsible for releasing one or more memory pages using virtual address (va)
