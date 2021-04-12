@@ -1,18 +1,15 @@
 #include "my_vm.h"
 
-
 char* vMap = NULL;
 char* pMap = NULL;
 char* pageDir = NULL;
 char* totalMem = NULL;
 
-int numPages;
-int offsetBits;
-int pageBits;
-int dirBits;
-
 int init = 0;
 
+int offsetBits = 0;
+int pageBits = 0;
+int dirBits = 0;
 int numPTE = 0;
 int numPDE = 0;
 int entriesPerPT = 0;
@@ -23,8 +20,9 @@ unsigned int size = 0;
 unsigned int missCount = 0;
 unsigned int totalCalls = 0;
 
-/*here's my set_physical_mem()
-sure hope this doesnt mess things up lol
+/*
+Function responsible for allocating and setting your physical memory
+*/
 void set_physical_mem() {
     if(init){
         return;
@@ -34,54 +32,17 @@ void set_physical_mem() {
     offsetBits = log(PGSIZE);
 	pageBits = (int)ceil((32-offsetBits)/2.0);
 	dirBits = 32 - offsetBits - pageBits;
-	numPTE = MEMSIZE/(PGSIZE + 4 + pow(2, 2-PTBITS));
+	numPTE = MEMSIZE/(PGSIZE + 4 + pow(2, 2-pageBits));
 	entriesPerPT = pow(2, pageBits);
 	numPDE = (int)ceil(numPTE/entriesPerPT);
-	
+
 	totalMem = malloc(MEMSIZE);
 	vMap = malloc(numPTE/8);
 	pMap = malloc(numPTE/8);
 	pageDir = totalMem + MEMSIZE - (4*numPDE + 4*numPDE*numPTE);
-	
+
 	memset(vMap, 0, numPTE/8);
 	memset(pMap, 0, numPTE/8);
-}
-*/
-
-
-/*
-Function responsible for allocating and setting your physical memory 
-*/
-void set_physical_mem() {
-    if(init){
-        return;
-    }
-    init = 1;
-    
-    //Allocate physical memory using mmap or malloc; this is the total size of
-    //your memory you are simulating
-
-    totalMem = (void*)malloc(MEMSIZE);
-
-    //HINT: Also calculate the number of physical and virtual pages and allocate
-    //virtual and physical bitmaps and initialize them
-    
-    // CEIL OR FLOOR FOR DIVISION???
-    numPages = MEMSIZE / PGSIZE;
-
-    // Init virtual and physical bitmaps
-    vMap = (void*)malloc(numPages);
-    pMap = (void*)malloc(numPages);
-
-    memset(vMap, 0, numPages * sizeof(pte_t));
-    memset(pMap, 0, numPages * sizeof(pte_t));
-
-    // Init page directory
-    offsetBits = (int)log(PGSIZE)/log(2);
-    pageBits = (32 - offsetBits) / 2;
-    dirBits = 32 - pageBits - pageBits;
-    pageDir = (void*)malloc(pow(2,dirBits) * sizeof(pde_t));
-    memset(pageDir, 0, pow(2,dirBits) * sizeof(pde_t));
 }
 
 
@@ -98,7 +59,7 @@ pte_t *translate(pde_t *pgdir, void *va) {
     * translation exists, then you can return physical address from the TLB.
     */
 
-    unsigned long virAdd = (long)va;
+    unsigned long virAdd = (unsigned long)va;
     unsigned long virAddOffset = (virAdd<<(dirBits+pageBits)) >> (dirBits+pageBits);
 
     // Page directory index
@@ -107,7 +68,7 @@ pte_t *translate(pde_t *pgdir, void *va) {
     unsigned long pageTabIndex = (virAdd<<dirBits) >> (pageBits + offsetBits);
 
     // Check page directory
-    unsigned char *pgByte = (char*)pageDir + pageDirIndex;
+    unsigned char *pgByte = pageDir + pageDirIndex;
     // Page directory index DNE
     if(!(*pgByte & (1 << pageDirIndex))){
         return NULL;
@@ -117,10 +78,13 @@ pte_t *translate(pde_t *pgdir, void *va) {
     pde_t *pdEntry = pgdir + pageDirIndex;
 
     pte_t *ptEntry = (pte_t*)((*pdEntry >> offsetBits) * PGSIZE) + pageTabIndex;
+	//pte_t *ptEntry = (pte_t*)(*pdEntry) + pageTabIndex; ??
 
     // Successful
     return (pte_t*)(*ptEntry + virAddOffset);
 }
+
+
 /*
 The function takes a page directory address, virtual address, physical address
 as an argument, and sets a page table entry. This function will walk the page
@@ -136,14 +100,14 @@ int page_map(pde_t *pgdir, void *va, void *pa)
 	int currPTE = ((*(char*)va) >> offsetBits) & (pow(2, pageBits)-1);
 	//beginning of current PT
 	char* PDEaddress = pageDir + (numPDE * 4) + (currPDE * entriesPerPT) * 4; //4 bytes per entry
-	
+
 	int mappingExists = 0;
 	for(int i = 0; i < numPDE; i++) {
 		if(*(pageDir + i*4) != 0) {//current PDE entry has mapping
-			if(*(pageDir + i*4) == PTEaddress) {
+			if(*(pageDir + i*4) == PDEaddress) {
 				mappingExists = 1;
 				break;
-			}	
+			}
 		}
 	}
 	if(!mappingExists) {
@@ -167,14 +131,14 @@ void *get_next_avail(int num_pages) {
 	for(unsigned long currPDE = 0; currPDE < numPDE; currPDE++) {
 		for(unsigned long currPTE = 0; currPTE < entriesPerPT; currPTE++) {
 			if((currEntry & 0x80) == 1) {
-				pageCount = 0; 
+				pageCount = 0;
 				firstEntry = -1;
-			}				
+			}
 			else {
 				pageCount++;
 				if(firstEntry == -1) {
 					firstEntry = currPTE;
-					firsPDE = currPDE;
+					firstPDE = currPDE;
 				}
 				//traverse physical bitmap
 				if(pageCount == num_pages) {
@@ -207,38 +171,47 @@ void *get_next_avail(int num_pages) {
 and used by the benchmark
 */
 void *a_malloc(unsigned int num_bytes) {
-    /* 
+    /*
      * HINT: If the physical memory is not yet initialized, then allocate and initialize.
      */
     if(!init){
         set_physical_mem();
     }
-   /* 
+   /*
     * HINT: If the page directory is not initialized, then initialize the
     * page directory. Next, using get_next_avail(), check if there are free pages. If
-    * free pages are available, set the bitmaps and map a new page. Note, you will 
-    * have to mark which physical pages are used. 
+    * free pages are available, set the bitmaps and map a new page. Note, you will
+    * have to mark which physical pages are used.
     */
 	unsigned int numPages = num_bytes / PGSIZE;
 	if(num_bytes % PGSIZE != 0) numPages++; //round up
-	
+
 	nextContent next = *(nextContent*)get_next_avail(numPages);
-	
+
 	//there are enough free pages
 	if(next.PDE != NULL) {
 		unsigned long VA = 0;
-		unsigned long baseVA = 0;
-		
-		baseVA |= next.PDE << (32 - dirBits); //set PD bits 
-		
+
+
+
+		int PDE = next.PDE;
+		int PTE = next.PTE;
+
 		for(int i = 0; i < numPages; i++) {
-			VA |= next.PTE+i << (offsetBits); //set PT bits
-			
+			VA = 0;
+			PTE = PTE + i;
+			if(PTE > entriesPerPT) {
+				PTE = 0;
+				PDE++;
+			}
+			VA |= PDE << (32 - dirBits); //set PD bits
+			VA |= PTE << (offsetBits); //set PT bits
+
 			//map physical to virtual
 			page_map(pageDir, &VA, totalMem + next.PHYS[i]*4);
 			//set virtual bitmap
-			char *temp = vMap + next.PTE + i;
-			*temp |= 1 << (7 - ((next.PTE+i) % 8));
+			char *temp = vMap + (PDE*entriesPerPT) + PTE;
+			*temp |= 1 << (7 - (PTE % 8));
 			//set physical bitmap
 			temp = pMap + next.PHYS[i];
 			*temp |= 1 << (7-(next.PHYS[i] % 8));
@@ -253,13 +226,16 @@ void *a_malloc(unsigned int num_bytes) {
 void a_free(void *va, int size) {
 
     /* Part 1: Free the page table entries starting from this virtual address
-     * (va). Also mark the pages free in the bitmap. Perform free only if the 
+     * (va). Also mark the pages free in the bitmap. Perform free only if the
      * memory from "va" to va+size is valid.
      *
      * Part 2: Also, remove the translation from the TLB
      */
-     
-    
+
+
+
+
+
 }
 
 
@@ -269,13 +245,13 @@ void a_free(void *va, int size) {
 void put_value(void *va, void *val, int size) {
 
     /* HINT: Using the virtual address and translate(), find the physical page. Copy
-     * the contents of "val" to a physical page. NOTE: The "size" value can be larger 
+     * the contents of "val" to a physical page. NOTE: The "size" value can be larger
      * than one page. Therefore, you may have to find multiple pages using translate()
      * function.
      */
 
-    long startAdd = (long)va;
-    long endAdd = ((long)va + size);
+    long startAdd = (unsigned long)va;
+    long endAdd = ((unsigned long)va + size);
 
     long startOffset = startAdd >> offsetBits;
     long endOffset = endAdd >> offsetBits;
@@ -287,10 +263,10 @@ void put_value(void *va, void *val, int size) {
     // Make sure this is a valid region of virtual memory
     // WIP
     for(i = startAdd; i < endOffset; i++){
-        byte = (char*)vMap + i;
+        byte = vMap + i;
 
     }
-    
+
     // Makes the copy from val to va
     int i;
     void* physAdd, *va2;
@@ -338,8 +314,8 @@ void mat_mult(void *mat1, void *mat2, int size, void *answer) {
 
     /* Hint: You will index as [i * size + j] where  "i, j" are the indices of the
      * matrix accessed. Similar to the code in test.c, you will use get_value() to
-     * load each element and perform multiplication. Take a look at test.c! In addition to 
-     * getting the values from two matrices, you will perform multiplication and 
+     * load each element and perform multiplication. Take a look at test.c! In addition to
+     * getting the values from two matrices, you will perform multiplication and
      * store the result to the "answer array"
      */
     int i, j, k, sum;
@@ -357,7 +333,6 @@ void mat_mult(void *mat1, void *mat2, int size, void *answer) {
         }
     }
 }
-
 
 
 
@@ -403,7 +378,7 @@ check_TLB(void *va) {
 		}
 	}
 	missCount++;
-	return NULL:
+	return NULL;
 }
 /*
  * Part 2: Print TLB miss rate.
@@ -412,10 +387,11 @@ check_TLB(void *va) {
 void
 print_TLB_missrate()
 {
-    double miss_rate = 0;	
+    double miss_rate = 0;
 
     /*Part 2 Code here to calculate and print the TLB miss rate*/
 	miss_rate = missCount * 1.0f / totalCalls;
-	
+
     fprintf(stderr, "TLB miss rate %lf \n", miss_rate);
 }
+
