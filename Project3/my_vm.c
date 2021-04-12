@@ -35,12 +35,12 @@ void set_physical_mem() {
 	numPDE = (int)ceil(numPTE/entriesPerPT);
 	
 	totalMem = malloc(MEMSIZE);
-	vMap = malloc(numPTE);
-	pMap = malloc(numPTE);
+	vMap = malloc(numPTE/8);
+	pMap = malloc(numPTE/8);
 	pageDir = totalMem + MEMSIZE - (4*numPDE + 4*numPDE*numPTE);
 	
-	memset(vMap, 0, numPTE);
-	memset(pMap, 0, numPTE);
+	memset(vMap, 0, numPTE/8);
+	memset(pMap, 0, numPTE/8);
 }
 */
 
