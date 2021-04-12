@@ -11,13 +11,17 @@ int offsetBits;
 int pageBits;
 int dirBits;
 
-int TLBsize;
-
 int init = 0;
 
 int numPTE = 0;
 int numPDE = 0;
 int entriesPerPT = 0;
+
+//TLB
+unsigned int oldestEntry = 0;
+unsigned int size = 0;
+unsigned int missCount = 0;
+unsigned int totalCalls = 0;
 
 /*here's my set_physical_mem()
 sure hope this doesnt mess things up lol
@@ -350,10 +354,23 @@ void mat_mult(void *mat1, void *mat2, int size, void *answer) {
 int
 add_TLB(void *va, void *pa)
 {
-
     /*Part 2 HINT: Add a virtual to physical page translation to the TLB */
-
-    return -1;
+	if(size < TLB_ENTRIES) {
+		int i = 0;
+		while(i < TLB_ENTRIES) {
+			if(tlb_store.entries[i].virtual_address == 0) {
+				tlb_store.entries[i].virtual_address = (unsigned long)va;
+				tlb_store.entries[i].physical_address = (unsigned long)pa;
+				size++;
+			}
+		}
+	}
+	else {
+		tlb_store.entries[oldestEntry].virtual_address = (unsigned long)va;
+		tlb_store.entries[oldestEntry].physical_address = (unsigned long)pa;
+		oldestEntry = (++oldestEntry)%TLB_ENTRIES;
+	}
+    return 1;
 }
 /*
  * Part 2: Check TLB for a valid translation.
@@ -362,9 +379,14 @@ add_TLB(void *va, void *pa)
  */
 pte_t *
 check_TLB(void *va) {
-
-    /* Part 2: TLB lookup code here */
-
+	totalCalls++;
+    for(int i = 0; i < TLB_ENTRIES; i++) {
+		if(tlb_store.entries[i].virtual_address == (unsigned long)va) {
+			return (pte_t*)tlb_store.entries[i].physical_address;
+		}
+	}
+	missCount++;
+	return NULL:
 }
 /*
  * Part 2: Print TLB miss rate.
@@ -376,9 +398,7 @@ print_TLB_missrate()
     double miss_rate = 0;	
 
     /*Part 2 Code here to calculate and print the TLB miss rate*/
-
-
-
-
+	miss_rate = missCount * 1.0f / totalCalls;
+	
     fprintf(stderr, "TLB miss rate %lf \n", miss_rate);
 }
