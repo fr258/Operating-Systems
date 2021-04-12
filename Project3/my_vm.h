@@ -44,6 +44,12 @@ struct tlb tlb_store;
 
 pthread_mutex_t mutex;
 
+typedef struct nextAvail{
+	pde_t PDE;
+	pte_t PTE;
+	char *PHYS;
+} nextContent;
+
 void set_physical_mem();
 pte_t* translate(pde_t *pgdir, void *va);
 int page_map(pde_t *pgdir, void *va, void* pa);
