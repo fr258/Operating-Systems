@@ -140,7 +140,6 @@ void *get_next_avail(int num_pages) {
 and used by the benchmark
 */
 void *a_malloc(unsigned int num_bytes) {
-
     /* 
      * HINT: If the physical memory is not yet initialized, then allocate and initialize.
      */
@@ -165,11 +164,45 @@ void a_free(void *va, int size) {
     /* Part 1: Free the page table entries starting from this virtual address
      * (va). Also mark the pages free in the bitmap. Perform free only if the 
      * memory from "va" to va+size is valid.
-     *
+     */
+
+    long startAdd = (long)va;
+    long endAdd = ((long)va + size);
+
+    long startOffset = startAdd >> offsetBits;
+    long endOffset = endAdd >> offsetBits;
+
+    unsigned long index = startOffset % TLB_ENTRIES;
+    char *byte;
+
+    // Make sure this is a valid region of virtual memory
+    unsigned long i, j;
+
+    for(i = 0; i < size; i++){
+        unsigned long virIndex = (startAdd>>offsetBits) + i;
+        byte = (char*)vMap + virIndex;
+        for(j = 0; j < 8; j++){
+            char bit = *byte << j;
+            bit = bit >> (7-j);
+            if((i < size) && (bit & 1 == 0)){
+                printf("Memory not allocated");
+                return;
+            }
+        }
+        i++;
+    }
+
+    /* 
      * Part 2: Also, remove the translation from the TLB
      */
-     
     
+    if(tlb_store.entries[index] != NULL && tlb_store.entries[index]->va == startAdd){
+        tlb_store.entries[index]->pa = NULL;
+        tlb_store.entries[index]->va = NULL;
+    }
+
+
+
 }
 
 
@@ -185,24 +218,26 @@ void put_value(void *va, void *val, int size) {
      */
 
     long startAdd = (long)va;
-    long endAdd = ((long)va + size);
-
-    long startOffset = startAdd >> offsetBits;
-    long endOffset = endAdd >> offsetBits;
-
-
-    int i;
-    char *byte;
 
     // Make sure this is a valid region of virtual memory
-    // WIP
-    for(i = startAdd; i < endOffset; i++){
-        byte = (char*)vMap + i;
-
+    
+    unsigned long i, j;
+    char *byte;
+    for(i = 0; i < size; i++){
+        unsigned long virIndex = (startAdd>>offsetBits) + i;
+        byte = (char*)vMap + virIndex;
+        for(j = 0; j < 8; j++){
+            char bit = *byte << j;
+            bit = bit >> (7-j);
+            if((i < size) && (bit & 1 == 0)){
+                printf("Memory not allocated");
+                return;
+            }
+        }
+        i++;
     }
     
     // Makes the copy from val to va
-    int i;
     void* physAdd, *va2;
     for(i = 0; i < size; i++){
         va2 = startAdd + i;
@@ -221,13 +256,26 @@ void get_value(void *va, void *val, int size) {
     */
 
     long startAdd = (long)va;
-    // long endAdd = ((long)va + size);
 
-    // long startOffset = startAdd >> offsetBits;
-    // long endOffset = endAdd >> offsetBits;
+    // Make sure this is a valid region of virtual memory
+    
+    unsigned long i, j;
+    char *byte;
+    for(i = 0; i < size; i++){
+        unsigned long virIndex = (startAdd>>offsetBits) + i;
+        byte = (char*)vMap + virIndex;
+        for(j = 0; j < 8; j++){
+            char bit = *byte << j;
+            bit = bit >> (7-j);
+            if((i < size) && (bit & 1 == 0)){
+                printf("Memory not allocated");
+                return;
+            }
+        }
+        i++;
+    }
 
     // Makes the copy from va to val
-    int i;
     void* physAdd, *va2;
     for(i = 0; i < size; i++){
         va2 = startAdd + i;
@@ -278,14 +326,21 @@ void mat_mult(void *mat1, void *mat2, int size, void *answer) {
  * Part 2: Add a virtual to physical page translation to the TLB.
  * Feel free to extend the function arguments or return type.
  */
+
+int counter = 0;
 int
 add_TLB(void *va, void *pa)
 {
-
     /*Part 2 HINT: Add a virtual to physical page translation to the TLB */
 
-    return -1;
+    tlb_store.entries[counter]->va = va;
+    tlb_store.entries[counter]->pa = pa;
+    
+    counter = (counter+1) % TLB_ENTRIES;
+
+    return 0;
 }
+
 /*
  * Part 2: Check TLB for a valid translation.
  * Returns the physical page address.
@@ -296,20 +351,31 @@ check_TLB(void *va) {
 
     /* Part 2: TLB lookup code here */
 
+    int i;
+    for(i = 0; i < TLB_ENTRIES; i++){
+        if(tlb_store.entries[i] != NULL && tlb_store.entries[i]->va == va){
+            return tlb_store.entries[i]->pa;
+        }
+    }
+
+    return -1;
 }
+
 /*
  * Part 2: Print TLB miss rate.
  * Feel free to extend the function arguments or return type.
  */
+
+unsigned long missCount;
+unsigned long hitCount;
+unsigned long referenceCount;
+
 void
 print_TLB_missrate()
 {
-    double miss_rate = 0;	
+    double miss_rate = missCount/referenceCount;	
 
     /*Part 2 Code here to calculate and print the TLB miss rate*/
-
-
-
 
     fprintf(stderr, "TLB miss rate %lf \n", miss_rate);
 }

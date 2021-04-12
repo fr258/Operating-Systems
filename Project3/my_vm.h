@@ -27,16 +27,22 @@ typedef unsigned long pde_t;
 
 #define TLB_ENTRIES 512
 
+struct tlbEntry{
+    unsigned long va;
+    unsigned long pa;
+};
+
 //Structure to represents TLB
 struct tlb {
     /*Assume your TLB is a direct mapped TLB with number of entries as TLB_ENTRIES
     * Think about the size of each TLB entry that performs virtual to physical
     * address translation.
     */
-
+    struct tlbEntry **entries;
 };
 struct tlb tlb_store;
 
+pthread_mutex_t mutex;
 
 void set_physical_mem();
 pte_t* translate(pde_t *pgdir, void *va);
