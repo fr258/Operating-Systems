@@ -1,10 +1,10 @@
 #include "my_vm.h"
 
 
-void* vMap = NULL;
-void* pMap = NULL;
-void* pageDir = NULL;
-void* totalMem = NULL;
+char* vMap = NULL;
+char* pMap = NULL;
+char* pageDir = NULL;
+char* totalMem = NULL;
 
 int numPages;
 int offsetBits;
@@ -14,6 +14,36 @@ int dirBits;
 int TLBsize;
 
 int init = 0;
+
+int numPTE = 0;
+int numPDE = 0;
+int entriesPerPT = 0;
+
+/*here's my set_physical_mem()
+sure hope this doesnt mess things up lol
+void set_physical_mem() {
+    if(init){
+        return;
+    }
+    init = 1;
+
+    offsetBits = log(PGSIZE);
+	pageBits = (int)ceil((32-offsetBits)/2.0);
+	dirBits = 32 - offsetBits - pageBits;
+	numPTE = MEMSIZE/(PGSIZE + 4 + pow(2, 2-PTBITS));
+	entriesPerPT = pow(2, pageBits);
+	numPDE = (int)ceil(numPTE/entriesPerPT);
+	
+	totalMem = malloc(MEMSIZE);
+	vMap = malloc(numPTE);
+	pMap = malloc(numPTE);
+	pageDir = totalMem + MEMSIZE - (4*numPDE + 4*numPDE*numPTE);
+	
+	memset(vMap, 0, numPTE);
+	memset(pMap, 0, numPTE);
+}
+*/
+
 
 /*
 Function responsible for allocating and setting your physical memory 
@@ -88,7 +118,6 @@ pte_t *translate(pde_t *pgdir, void *va) {
     return (pte_t*)(*ptEntry + virAddOffset);
 }
 
-
 /*
 The function takes a page directory address, virtual address, physical address
 as an argument, and sets a page table entry. This function will walk the page
@@ -97,44 +126,61 @@ virtual address is not present, then a new entry will be added
 */
 int page_map(pde_t *pgdir, void *va, void *pa)
 {
-
     /*HINT: Similar to translate(), find the page directory (1st level)
     and page table (2nd-level) indices. If no mapping exists, set the
     virtual to physical mapping */
+	int currPDE = (*(char*)va) >> (32 - dirBits);
+	int currPTE = ((*(char*)va) >> offsetBits) & (pow(2, pageBits)-1);
+	//beginning of current PT
+	char* PDEaddress = pageDir + (numPDE * 4) + (currPDE * entriesPerPT) * 4; //4 bytes per entry
 	
-	int currPDIndex = va >> (32 - dirBits); //extract directory bits to get PD index
-	
-	int currPTIndex = (va >> (32 - pageBits)) & (2^pageBits - 1); //extract page bits to get PT index
-	
-	int vMapEntry = currPDIndex * (2^pageBits - 1) + currPTIndex;
-	int vMapOffset = vMapEntry % 8;
-	
-	if(0 == (*(vMap + (vMapEntry / 8)) >> vMapOffset)) {
-	
-		pte_t *currPTEntry = *(pgdir + currPDIndex) + currPTIndex;
-		
-		if(*currPTEntry == 0) {
-			currPTEntry = pa;
-			
-			*(vMap + (vMapEntry / 8)) |= 1 << vMapOffset;
-			
-			return 0;
+	int mappingExists = 0;
+	for(int i = 0; i < numPDE; i++) {
+		if(*(pageDir + i*4) != 0) {//current PDE entry has mapping
+			if(*(pageDir + i*4) == PTEaddress) {
+				mappingExists = 1;
+				break;
+			}	
 		}
-		
 	}
-	
-    return -1;
-}
+	if(!mappingExists) {
+		*(pageDir + currPDE*4) = PDEaddress;
 
+	}
+	*(char*)(PDEaddress + 4*currPTE) = pa;
+	return 1;
+}
 
 /*Function that gets the next available page
 */
 void *get_next_avail(int num_pages) {
- 
-    //Use virtual address bitmap to find the next free page
-
+	int firstEntry = -1;
+	int currEntry = vMap;
+	int pageCount = 0;
+	for(int currPDE = 0; currPDE < numPDE; currPDE++) {
+		for(int currPTE = 0; currPTE < entriesPerPT; currPTE++) {
+			if((currEntry & 0x80) == 1) {
+				pageCount = 0; 
+				firstEntry = -1;
+			}				
+			else {
+				pageCount++;
+				if(firstEntry == -1) {
+					firstEntry = currPTE;
+				}
+				if(pageCount == num_pages) {
+					retVal->PDE = currPDE;
+					retVal->PTE = currPTE;
+					retVal->PHYS = totalMem + currPDE * entriesPerPT + currPTE;
+					return retVal;
+				}
+			}
+			currEntry >>= 1;
+		}
+	}
+	retVal->PDE = NULL;
+	return retVal;
 }
-
 
 /* Function responsible for allocating pages
 and used by the benchmark
@@ -154,7 +200,30 @@ void *a_malloc(unsigned int num_bytes) {
     * free pages are available, set the bitmaps and map a new page. Note, you will 
     * have to mark which physical pages are used. 
     */
-
+	
+	int numPages = (int)ceil((long double)num_bytes / PGSIZE);
+	nextContent next = *(nextContent*)get_next_avail(numPages);
+	
+	//there are enough free pages
+	if(next.PTE != NULL) {
+		unsigned long VA = 0;
+		
+		VA |= next.PDE << (32 - dirBits); //set PD bits
+		VA |= next.PTE << (32 - dirBits - pageBits); //set PT bits
+		
+		if(page_map(pageDir, &VA, next.PHYS)!=-1) {
+			//(num page tables before current * entries per table + number of entries from start of current table) / 8 bits/byte
+			int totalBits = next.PDE * entriesPerPT + next.PTE;
+			
+			//settingbitmap bit to true
+			*(vMap + VbitmapBytes) |= 1 << VbitmapBit;
+			for(unsigned long i = vMap + totalBits, j = 0, k = pMap + totalBits; j < numPages; i >>=1, j++, k >>= 1) {
+				i |= 0x80;
+			}
+			
+			return VA;
+		}
+	}
     return NULL;
 }
 
