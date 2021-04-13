@@ -165,9 +165,10 @@ void *get_next_avail(int num_pages) {
 				pageCount = 0;
 			}
 			else {
+				//printf("found available in  
 				pageCount++;
 				if(firstEntry == -1) {
-					firstEntry = currByte + i;
+					firstEntry = currByte*8 + i;
 				}
 				if(pageCount == num_pages) {
 					unsigned long *PHYS = malloc(sizeof(unsigned long) * num_pages);
@@ -180,7 +181,7 @@ void *get_next_avail(int num_pages) {
 							current >>= 7;
 							
 							if((char)(current&1) == (char)0) {
-								PHYS[pageCount] = PcurrByte + j;
+								PHYS[pageCount] = PcurrByte*8 + j;
 								pageCount++;
 							}
 							if(pageCount == num_pages) {
@@ -201,11 +202,13 @@ void *get_next_avail(int num_pages) {
 	return retVal;
 }
 
+/* Function responsible for allocating pages
+and used by the benchmark
+*/
 void *a_malloc(unsigned int num_bytes) {
     /*
      * HINT: If the physical memory is not yet initialized, then allocate and initialize.
      */
-	pthread_mutex_lock(&mutex);
     if(!init){
         set_physical_mem();
     }
@@ -223,7 +226,6 @@ void *a_malloc(unsigned int num_bytes) {
 
 	//there are enough free pages
 	if(next.PTE != -1) {
-		printf("returned valid\n");
 		unsigned long VA = 0;
 
 		unsigned long PDE = next.PTE/entriesPerPT;
@@ -241,21 +243,27 @@ void *a_malloc(unsigned int num_bytes) {
 			}
 			VA |= PDE << (32 - dirBits); //set PD bits
 			VA |= PTE << (offsetBits); //set PT bits
+			
 
 			//map physical to virtual
 			page_map(pageDir, (void*)VA, totalMem + next.PHYS[i]*4);
 
 			//set virtual bitmap
-			vMap[(next.PTE+i)/8] |= (1 << VbitTracker);
+			*(char*)(vMap+(next.PTE+i)/8) |= (char)(1 << (7-VbitTracker));
 			
-			pMap[next.PHYS[i]/8] |= (1 << (7-next.PHYS[i]%8));
+			//*(char*)(vMap+(next.PTE+i)/8) |= (1 << (VbitTracker));
+			
+			//vMap[(next.PTE+i)/8] = 1;
+			//printf("set byte %d, bit %d to 1\n", (next.PTE+i)/8, VbitTracker);
+			*(char*)(pMap+next.PHYS[i]/8) |= (char)(1 << (7-next.PHYS[i]%8));
 			
 			VbitTracker = (VbitTracker+1) % 8;
 		}
-        pthread_mutex_unlock(&mutex);
-		return (void*)VA;
+		VA = 0;
+		VA |= (next.PTE/entriesPerPT) << (32 - dirBits); //set PD bits
+		VA |= (next.PTE%entriesPerPT) << (offsetBits); //set PT bits
+		return VA;
 	}
-    pthread_mutex_unlock(&mutex);
     return -1;
 }
 
