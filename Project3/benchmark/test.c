@@ -25,8 +25,11 @@ int main() {
     printf("Storing integers to generate a SIZExSIZE matrix\n");
     for (i = 0; i < SIZE; i++) {
         for (j = 0; j < SIZE; j++) {
+            printf("a\n");
             address_a = (unsigned int)a + ((i * SIZE * sizeof(int))) + (j * sizeof(int));
+            printf("b\n");
             address_b = (unsigned int)b + ((i * SIZE * sizeof(int))) + (j * sizeof(int));
+            printf("c\n");
             put_value((void *)address_a, &x, sizeof(int));
             put_value((void *)address_b, &x, sizeof(int));
         }

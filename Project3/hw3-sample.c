@@ -82,7 +82,7 @@ static void set_bit_at_index(char *bitmap, int index)
 }
 
 
-//Example 3
+//Example 4
 //Function to get a bit at "index"
 static int get_bit_at_index(char *bitmap, int index)
 {

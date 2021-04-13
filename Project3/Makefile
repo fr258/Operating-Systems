@@ -11,7 +11,7 @@ my_vm.a: my_vm.o
 
 my_vm.o: my_vm.h
 
-	$(CC)	$(CFLAGS)  my_vm.c -pthread
+	$(CC)	$(CFLAGS)  my_vm.c -pthread -lm
 
 clean:
 	rm -rf *.o *.a
