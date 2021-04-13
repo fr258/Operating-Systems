@@ -173,9 +173,10 @@ void *get_next_avail(int num_pages) {
 				pageCount = 0;
 			}
 			else {
+				//printf("found available in  
 				pageCount++;
 				if(firstEntry == -1) {
-					firstEntry = currByte + i;
+					firstEntry = currByte*8 + i;
 				}
 				if(pageCount == num_pages) {
 					unsigned long *PHYS = malloc(sizeof(unsigned long) * num_pages);
@@ -188,7 +189,7 @@ void *get_next_avail(int num_pages) {
 							current >>= 7;
 							
 							if((char)(current&1) == (char)0) {
-								PHYS[pageCount] = PcurrByte + j;
+								PHYS[pageCount] = PcurrByte*8 + j;
 								pageCount++;
 							}
 							if(pageCount == num_pages) {
@@ -209,6 +210,9 @@ void *get_next_avail(int num_pages) {
 	return retVal;
 }
 
+/* Function responsible for allocating pages
+and used by the benchmark
+*/
 void *a_malloc(unsigned int num_bytes) {
     /*
      * HINT: If the physical memory is not yet initialized, then allocate and initialize.
@@ -231,7 +235,6 @@ void *a_malloc(unsigned int num_bytes) {
 
 	//there are enough free pages
 	if(next.PTE != -1) {
-		printf("returned valid\n");
 		unsigned long VA = 0;
 
 		unsigned long PDE = next.PTE/entriesPerPT;
@@ -249,21 +252,29 @@ void *a_malloc(unsigned int num_bytes) {
 			}
 			VA |= PDE << (32 - dirBits); //set PD bits
 			VA |= PTE << (offsetBits); //set PT bits
+			
 
 			//map physical to virtual
 			page_map(pageDir, (void*)VA, totalMem + next.PHYS[i]*4);
 
 			//set virtual bitmap
-			vMap[(next.PTE+i)/8] |= (1 << VbitTracker);
+			*(char*)(vMap+(next.PTE+i)/8) |= (char)(1 << (7-VbitTracker));
 			
-			pMap[next.PHYS[i]/8] |= (1 << (7-next.PHYS[i]%8));
+			//*(char*)(vMap+(next.PTE+i)/8) |= (1 << (VbitTracker));
+			
+			//vMap[(next.PTE+i)/8] = 1;
+			//printf("set byte %d, bit %d to 1\n", (next.PTE+i)/8, VbitTracker);
+			*(char*)(pMap+next.PHYS[i]/8) |= (char)(1 << (7-next.PHYS[i]%8));
 			
 			VbitTracker = (VbitTracker+1) % 8;
 		}
-        pthread_mutex_unlock(&mutex);
-		return (void*)VA;
+		VA = 0;
+		VA |= (next.PTE/entriesPerPT) << (32 - dirBits); //set PD bits
+		VA |= (next.PTE%entriesPerPT) << (offsetBits); //set PT bits
+		pthread_mutex_unlock(&mutex);
+		return VA;
 	}
-    pthread_mutex_unlock(&mutex);
+	pthread_mutex_unlock(&mutex);
     return -1;
 }
 
@@ -319,6 +330,33 @@ void a_free(void *va, int size) {
         }
         i++;
     }
+		
+	
+	unsigned long numPages = size/ PGSIZE;
+	if(size % PGSIZE != 0) numPages++; //round up
+	
+	unsigned long PDE = ((unsigned long)va) >> (32 - dirBits);
+	unsigned long PTE =  (((unsigned long)va) >> offsetBits) & (unsigned long)(pow(2, pageBits)-1);
+
+	unsigned long vMapIndex = PDE * entriesPerPT + PTE;
+
+	char VbitTracker = vMapIndex % 8;
+	
+	for(int i = 0; i < numPages; i++) {
+		//map physical to virtual
+		//page_map(pageDir, (void*)VA, totalMem + next.PHYS[i]*4);
+
+		//set virtual bitmap
+		*(char*)(vMap+(vMapIndex+i)/8) -= (char)(1 << (7-VbitTracker));
+		
+		unsigned long currPhys = *(unsigned long*)(pageDir + 4*numPDE + 4*entriesPerPT*PDE + 4*PTE);
+		
+		unsigned long currPhysIndex = (currPhys - (unsigned long)(totalMem))/PGSIZE;
+		//set physical bitmap
+		*(char*)(pMap+currPhysIndex/8) -= (char)(1 << (7-currPhysIndex%8));
+		VbitTracker = (VbitTracker+1) % 8;
+	}
+	
 
     /* 
      * Part 2: Also, remove the translation from the TLB
@@ -330,6 +368,7 @@ void a_free(void *va, int size) {
     }
     pthread_mutex_unlock(&mutex);
 }
+
 
 
 /* The function copies data pointed by "val" to physical
@@ -344,7 +383,7 @@ void put_value(void *va, void *val, int size) {
      * function.
      */
 
-    long startAdd = (long)va;
+    unsigned long startAdd = (unsigned long)va;
 
     // Make sure this is a valid region of virtual memory
     printf("before put check\n");
@@ -352,16 +391,20 @@ void put_value(void *va, void *val, int size) {
     char *byte;
     for(i = 0; i < size; i++){
         unsigned long virIndex = (startAdd>>offsetBits) + i;
+		printf("this line\n");
         byte = (char*)vMap + virIndex;
+		printf("end line\n");
         for(j = 0; j < 8; j++){
+			printf("this far\n");
             char bit = *byte << j;
+			printf("end this far\n");
             bit = bit >> (7-j);
             if((i < size) && (bit & 1 == 0)){
                 printf("Memory not allocated\n");
                 pthread_mutex_unlock(&mutex);
                 return;
             }
-        }
+        } 
         i++;
     }
     printf("after put check, before copy\n");
