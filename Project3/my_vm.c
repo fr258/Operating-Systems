@@ -209,6 +209,7 @@ void *a_malloc(unsigned int num_bytes) {
     /*
      * HINT: If the physical memory is not yet initialized, then allocate and initialize.
      */
+	pthread_mutex_lock(&mutex);
     if(!init){
         set_physical_mem();
     }
@@ -262,8 +263,10 @@ void *a_malloc(unsigned int num_bytes) {
 		VA = 0;
 		VA |= (next.PTE/entriesPerPT) << (32 - dirBits); //set PD bits
 		VA |= (next.PTE%entriesPerPT) << (offsetBits); //set PT bits
+		pthread_mutex_unlock(&mutex);
 		return VA;
 	}
+	pthread_mutex_unlock(&mutex);
     return -1;
 }
 
