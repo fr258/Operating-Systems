@@ -305,6 +305,33 @@ void a_free(void *va, int size) {
         }
         i++;
     }
+		
+	
+	unsigned long numPages = size/ PGSIZE;
+	if(size % PGSIZE != 0) numPages++; //round up
+	
+	unsigned long PDE = ((unsigned long)va) >> (32 - dirBits);
+	unsigned long PTE =  (((unsigned long)va) >> offsetBits) & (unsigned long)(pow(2, pageBits)-1);
+
+	unsigned long vMapIndex = PDE * entriesPerPT + PTE;
+
+	char VbitTracker = vMapIndex % 8;
+	
+	for(int i = 0; i < numPages; i++) {
+		//map physical to virtual
+		//page_map(pageDir, (void*)VA, totalMem + next.PHYS[i]*4);
+
+		//set virtual bitmap
+		*(char*)(vMap+(vMapIndex+i)/8) -= (char)(1 << (7-VbitTracker));
+		
+		unsigned long currPhys = *(unsigned long*)(pageDir + 4*numPDE + 4*entriesPerPT*PDE + 4*PTE);
+		
+		unsigned long currPhysIndex = (currPhys - (unsigned long)(totalMem))/PGSIZE;
+		//set physical bitmap
+		*(char*)(pMap+currPhysIndex/8) -= (char)(1 << (7-currPhysIndex%8));
+		VbitTracker = (VbitTracker+1) % 8;
+	}
+	
 
     /* 
      * Part 2: Also, remove the translation from the TLB
@@ -316,6 +343,7 @@ void a_free(void *va, int size) {
     }
     pthread_mutex_unlock(&mutex);
 }
+
 
 
 /* The function copies data pointed by "val" to physical
