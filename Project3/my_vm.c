@@ -357,7 +357,7 @@ void put_value(void *va, void *val, int size) {
      * function.
      */
 
-    long startAdd = (long)va;
+    unsigned long startAdd = (unsigned long)va;
 
     // Make sure this is a valid region of virtual memory
     
@@ -365,19 +365,23 @@ void put_value(void *va, void *val, int size) {
     char *byte;
     for(i = 0; i < size; i++){
         unsigned long virIndex = (startAdd>>offsetBits) + i;
+		printf("this line\n");
         byte = (char*)vMap + virIndex;
+		printf("end line\n");
         for(j = 0; j < 8; j++){
+			printf("this far\n");
             char bit = *byte << j;
+			printf("end this far\n");
             bit = bit >> (7-j);
             if((i < size) && (bit & 1 == 0)){
                 printf("Memory not allocated");
                 pthread_mutex_unlock(&mutex);
                 return;
             }
-        }
+        } 
         i++;
     }
-
+	
     // Makes the copy from val to va
     void* physAdd, *va2;
     for(i = 0; i < size; i++){
