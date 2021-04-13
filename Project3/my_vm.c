@@ -312,21 +312,6 @@ void a_free(void *va, int size) {
                 pthread_mutex_unlock(&mutex);
                 return;
             }
-            // Free physical bitmap
-            pa = (unsigned long)translate(pageDir, (i*8 + j) << offsetBits);
-            physPage = pa >> (offsetBits);
-
-            char *region = ((char *) pMap) + (physPage / 8);
-            bit = 1 << (physPage % 8);
-            *region &= ~bit;
-
-            // Free virtual bitmap
-            char bmask = (1 << j);
-            *byte = *byte ^ (bmask);
-
-            region = ((char *) vMap) + (startPage / 8);
-            bit = 1 << (startPage % 8);
-            *region &= ~bit;
         }
         i++;
     }
@@ -361,10 +346,12 @@ void a_free(void *va, int size) {
     /* 
      * Part 2: Also, remove the translation from the TLB
      */
-    
-    if(tlb_store.entries[index] != NULL && tlb_store.entries[index]->va == startAdd){
-        tlb_store.entries[index]->pa = (unsigned long)NULL;
-        tlb_store.entries[index]->va = (unsigned long)NULL;
+    int tlbIndex;
+    for(tlbIndex = 0; tlbIndex < TLB_ENTRIES; tlbIndex++){
+        if(tlb_store.entries[tlbIndex] != NULL && tlb_store.entries[tlbIndex]->va == startAdd){
+            tlb_store.entries[index]->pa = (unsigned long)NULL;
+            tlb_store.entries[index]->va = (unsigned long)NULL;
+        }
     }
     pthread_mutex_unlock(&mutex);
 }
@@ -485,7 +472,7 @@ void mat_mult(void *mat1, void *mat2, int size, void *answer) {
             for(k = 0; k < size; k++){
                 get_value((int*)mat1 + (i*size) + k, (void*)mat1Val, sizeof(int));
                 get_value((int*)mat2 + (k*size) + j, (void*)mat2Val, sizeof(int));
-                *ansVal = *mat1Val * *mat2Val;
+                *ansVal += *mat1Val * *mat2Val;
             }
             put_value((int*)answer + (i*size) + j, (void*)ansVal, sizeof(int));
         }
