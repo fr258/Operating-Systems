@@ -46,9 +46,8 @@ struct tlb tlb_store;
 pthread_mutex_t mutex;
 
 typedef struct nextAvail{
-	pde_t PDE;
 	pte_t PTE;
-	char *PHYS;
+	unsigned long *PHYS;
 } nextContent;
 
 void set_physical_mem();
