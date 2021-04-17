@@ -188,10 +188,10 @@ int tfs_mkfs() {
 	//write superblock
 	bio_write(0, &superBlock);
 	//write inode map
-	for(int i = 0; i < superBlock.d_bitmap_blk - superBlock.i_bitmap_blk; i++)
+	for(int i = superBlock.i_bitmap_blk; i < superBlock.d_bitmap_blk; i++)
 		bio_write(i, iMap + i*BLOCKSIZE);
 	//write dnode map
-	for(int i = 0; i < superBlock.i_start_blk - superBlock.d_bitmap_blk; i++)
+	for(int i = superBlock.d_bitmap_blk; i < superBlock.i_start_blk; i++)
 		bio_write(i, iMap + i*BLOCKSIZE);
 	//write root inode
 	bio_write(superBlock.i_start_blk, &tempNode);
