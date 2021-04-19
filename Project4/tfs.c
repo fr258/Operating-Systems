@@ -40,26 +40,26 @@ struct superblock superblock;
 int get_avail_ino() {
 
 	// Step 1: Read inode bitmap from disk
-	char inodeBitmap[];
-	bio_read(superblock.i_bitmap_blk, inodeBitmap);
+	// char inodeBitmap[];
+	// bio_read(superblock.i_bitmap_blk, inodeBitmap);
 
 	// Step 2: Traverse inode bitmap to find an available slot
 	int retVal = -1;
 
 	for(int i = 0; i < MAX_INUM; i++) {
-		if(get_bitmap(inodeBitmap, i) & 1){
+		if(get_bitmap(iMap, i) & 1){
 			// Set next avail inode number
 			retVal = i;
 
 			// Update bitmap
-			set_bitmap(inodeBitmap, i);
+			set_bitmap(iMap, i);
 			
 			break;
 		}
 	}
 
 	// Step 3: Update inode bitmap and write to disk 
-	bio_write(superblock.i_bitmap_blk, inodeBitmap);
+	bio_write(superblock.i_bitmap_blk, iMap);
 
 	return retVal;
 }
@@ -70,26 +70,26 @@ int get_avail_ino() {
 int get_avail_blkno() {
 
 	// Step 1: Read data block bitmap from disk
-	char blockBitmap[];
-	bio_read(superblock.d_bitmap_blk, blockBitmap);
+	// char blockBitmap[];
+	// bio_read(superblock.d_bitmap_blk, blockBitmap);
 
 	// Step 2: Traverse data block bitmap to find an available slot
 	int retVal = -1;
 
 	for(int i = 0; i < MAX_DNUM; i++) {
-		if(get_bitmap(blockBitmap, i) & 1){
+		if(get_bitmap(dMap, i) & 1){
 			// Set next avail data block number
 			retVal = i;
 
 			// Update bitmap
-			set_bitmap(blockBitmap, i);
+			set_bitmap(dMap, i);
 			
 			break;
 		}
 	}
 
 	// Step 3: Update data block bitmap and write to disk 
-	bio_write(superblock.i_bitmap_blk, blockBitmap);
+	bio_write(superblock.i_bitmap_blk, dMap);
 
 	return retVal;
 }
