@@ -18,9 +18,14 @@
 #include <sys/time.h>
 #include <libgen.h>
 #include <limits.h>
+#include <stdint.h>
 
 #include "block.h"
 #include "tfs.h"
+
+struct superblock superBlock;
+bitmap_t iMap;
+bitmap_t dMap;
 
 char diskfile_path[PATH_MAX];
 
@@ -172,18 +177,58 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
  * Make file system
  */
 int tfs_mkfs() {
-
 	// Call dev_init() to initialize (Create) Diskfile
+	diskfile[0] = "./disk";
+	
+	dev_init();
 
 	// write superblock information
-
+	superBlock.magic_num = MAGIC_NUM;													/* magic number */
+	superBlock.max_inum = MAX_INUM;														/* maximum inode number */
+	superBlock.max_dnum = MAX_DNUM;														/* maximum data block number */
+	superBlock.i_bitmap_blk = 1;														/* start block of inode bitmap */
+	
+	superBlock.d_bitmap_blk = 1 + (MAX_INUM/8)/BLOCKSIZE;								/* start block of data block bitmap */
+	if((MAX_INUM/8)%BLOCKSIZE != 0) superBlock.d_bitmap_blk++;
+	
+	superBlock.i_start_blk =  superBlock.d_bitmap_blk + (MAX_DNUM/8)/BLOCKSIZE;			/* start block of inode region */
+	if((MAX_DNUM/8)%BLOCKSIZE != 0) superBlock.i_start_blk++;
+	
+	superBlock.d_start_blk =  superBlock.i_start_blk + (MAX_INUM*sizeof(inode))/BLOCKSIZE;		/* start block of data block region */
+	if((MAX_INUM*sizeof(inode))%BLOCKSIZE != 0) superBlock.d_start_blk++;
+	
 	// initialize inode bitmap
-
+	iMap = malloc(MAX_INUM/8);
+	memset(iMap, 0, MAX_INUM/8);
+	
 	// initialize data block bitmap
+	dMap = malloc(MAX_DNUM/8);
+	memset(dMap, 0, MAX_DNUM/8);
 
 	// update bitmap information for root directory
+	set_bitmap(iMap, 0);
 
 	// update inode for root directory
+	inode tempNode;
+	tempNode.ino = 0;			/* inode number */
+	tempNode.valid = 1;			/* validity of the inode */
+	tempNode.size = 1;				/* size of the file */
+	tempNode.type = 1;				/* type of the file */
+	tempNode.link = 2;				/* link count */
+//	tempNode.direct_ptr[16];		/* direct pointer to data block */
+//	tempNode.indirect_ptr[8];	/* indirect pointer to data block */
+//	tempNode.vstat;				/* inode stat */
+
+	//write superblock
+	bio_write(0, &superBlock);
+	//write inode map
+	for(int i = superBlock.i_bitmap_blk, j = 0; i < superBlock.d_bitmap_blk; i++, j++)
+		bio_write(i, iMap + j*BLOCKSIZE);
+	//write dnode map
+	for(int i = superBlock.d_bitmap_blk, j = 0; i < superBlock.i_start_blk; i++, j++)
+		bio_write(i, dMap + j*BLOCKSIZE); 
+	//write root inode
+	bio_write(superBlock.i_start_blk, &tempNode);
 
 	return 0;
 }
@@ -195,9 +240,26 @@ int tfs_mkfs() {
 static void *tfs_init(struct fuse_conn_info *conn) {
 
 	// Step 1a: If disk file is not found, call mkfs
-
+	if(access(diskfile_PATH, F_OK) != 0)
+		tfg_mkfs();
   // Step 1b: If disk file is found, just initialize in-memory data structures
   // and read superblock from disk
+	else {
+		char* temp = malloc(BLOCKSIZE);
+		bio_read(0, temp);
+		superBlock = *(struct superblock*)temp;
+		free(temp); //?
+		
+		//read in iMap
+		temp = malloc(BUFFSIZE);
+		bio_read(superBlock.i_bitmap_blk, temp);
+		iMap = (bitmap_t)temp;
+		
+		//read in dMap
+		temp = malloc(BUFFSIZE);
+		bio_read(superBlock.d_bitmap_blk, temp);
+		dMap = (bitmap_t)temp;
+	}
 
 	return NULL;
 }
