@@ -25,6 +25,8 @@
 char diskfile_path[PATH_MAX];
 
 // Declare your in-memory data structures here
+struct superblock superblock;
+
 
 /* 
  * Get available inode number from bitmap
@@ -32,12 +34,28 @@ char diskfile_path[PATH_MAX];
 int get_avail_ino() {
 
 	// Step 1: Read inode bitmap from disk
-	
+	char inodeBitmap[];
+	bio_read(superblock.i_bitmap_blk, inodeBitmap);
+
 	// Step 2: Traverse inode bitmap to find an available slot
+	int retVal = -1;
+
+	for(int i = 0; i < MAX_INUM; i++) {
+		if(get_bitmap(inodeBitmap, i) & 1){
+			// Set next avail inode number
+			retVal = i;
+
+			// Update bitmap
+			set_bitmap(inodeBitmap, i);
+			
+			break;
+		}
+	}
 
 	// Step 3: Update inode bitmap and write to disk 
+	bio_write(superblock.i_bitmap_blk, inodeBitmap);
 
-	return 0;
+	return retVal;
 }
 
 /* 
@@ -46,12 +64,28 @@ int get_avail_ino() {
 int get_avail_blkno() {
 
 	// Step 1: Read data block bitmap from disk
-	
+	char blockBitmap[];
+	bio_read(superblock.d_bitmap_blk, blockBitmap);
+
 	// Step 2: Traverse data block bitmap to find an available slot
+	int retVal = -1;
+
+	for(int i = 0; i < MAX_DNUM; i++) {
+		if(get_bitmap(blockBitmap, i) & 1){
+			// Set next avail data block number
+			retVal = i;
+
+			// Update bitmap
+			set_bitmap(blockBitmap, i);
+			
+			break;
+		}
+	}
 
 	// Step 3: Update data block bitmap and write to disk 
+	bio_write(superblock.i_bitmap_blk, blockBitmap);
 
-	return 0;
+	return retVal;
 }
 
 /* 
@@ -172,8 +206,21 @@ static void tfs_destroy(void *userdata) {
 
 	// Step 1: De-allocate in-memory data structures
 
-	// Step 2: Close diskfile
+	// Free inodes
+	int i;
+	for(i = 0; i < MAX_INUM; i++){
+		free(<inode block starting address> + (i * BLOCK_SIZE));
+	}
 
+	// Free the bitmaps
+	free(<inode bitmap address>);
+	free(<data block bitmap address>);
+
+	// Free superblock
+	free(superblock);
+	
+	// Step 2: Close diskfile
+	dev_close();
 }
 
 static int tfs_getattr(const char *path, struct stat *stbuf) {
