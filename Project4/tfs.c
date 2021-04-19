@@ -24,7 +24,7 @@
 #include "block.h"
 #include "tfs.h"
 
-struct superblock superBlock;
+
 bitmap_t iMap;
 bitmap_t dMap;
 
@@ -247,7 +247,7 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 		memcpy(block+currentDirentInBlock, &dirent, sizeof(dirent)); //write block in memory
 		bio_write(dir_inode->direct_ptr[i], block); //write block to disk
 		set_bitmap(iMap, f_ino); //set iMap in memory
-		for(int d = superBlock.i_bitmap_blk, j = 0; d < superBlock.d_bitmap_blk; d++, j++) //write iMap to disk
+		for(int d = superblock.i_bitmap_blk, j = 0; d < superblock.d_bitmap_blk; d++, j++) //write iMap to disk
 			bio_write(d, iMap + j*BLOCKSIZE);
 		
 		struct inode tempNode;
@@ -299,19 +299,19 @@ int tfs_mkfs() {
 	dev_init();
 
 	// write superblock information
-	superBlock.magic_num = MAGIC_NUM;													/* magic number */
-	superBlock.max_inum = MAX_INUM;														/* maximum inode number */
-	superBlock.max_dnum = MAX_DNUM;														/* maximum data block number */
-	superBlock.i_bitmap_blk = 1;														/* start block of inode bitmap */
+	superblock.magic_num = MAGIC_NUM;													/* magic number */
+	superblock.max_inum = MAX_INUM;														/* maximum inode number */
+	superblock.max_dnum = MAX_DNUM;														/* maximum data block number */
+	superblock.i_bitmap_blk = 1;														/* start block of inode bitmap */
 	
-	superBlock.d_bitmap_blk = 1 + (MAX_INUM/8)/BLOCKSIZE;								/* start block of data block bitmap */
-	if((MAX_INUM/8)%BLOCKSIZE != 0) superBlock.d_bitmap_blk++;
+	superblock.d_bitmap_blk = 1 + (MAX_INUM/8)/BLOCKSIZE;								/* start block of data block bitmap */
+	if((MAX_INUM/8)%BLOCKSIZE != 0) superblock.d_bitmap_blk++;
 	
-	superBlock.i_start_blk =  superBlock.d_bitmap_blk + (MAX_DNUM/8)/BLOCKSIZE;			/* start block of inode region */
-	if((MAX_DNUM/8)%BLOCKSIZE != 0) superBlock.i_start_blk++;
+	superblock.i_start_blk =  superblock.d_bitmap_blk + (MAX_DNUM/8)/BLOCKSIZE;			/* start block of inode region */
+	if((MAX_DNUM/8)%BLOCKSIZE != 0) superblock.i_start_blk++;
 	
-	superBlock.d_start_blk =  superBlock.i_start_blk + (MAX_INUM*sizeof(inode))/BLOCKSIZE;		/* start block of data block region */
-	if((MAX_INUM*sizeof(inode))%BLOCKSIZE != 0) superBlock.d_start_blk++;
+	superblock.d_start_blk =  superblock.i_start_blk + (MAX_INUM*sizeof(inode))/BLOCKSIZE;		/* start block of data block region */
+	if((MAX_INUM*sizeof(inode))%BLOCKSIZE != 0) superblock.d_start_blk++;
 	
 	// initialize inode bitmap
 	iMap = malloc(MAX_INUM/8);
@@ -339,16 +339,16 @@ int tfs_mkfs() {
 
 	//write superblock
 	char* temp = malloc(BLOCKSIZE);
-	memcpy(temp, &superBlock, sizeof(superBlock));
+	memcpy(temp, &superblock, sizeof(superblock));
 	bio_write(0, temp);
 	//write inode map
-	for(int i = superBlock.i_bitmap_blk, j = 0; i < superBlock.d_bitmap_blk; i++, j++)
+	for(int i = superblock.i_bitmap_blk, j = 0; i < superblock.d_bitmap_blk; i++, j++)
 		bio_write(i, iMap + j*BLOCKSIZE);
 	//write dnode map
-	for(int i = superBlock.d_bitmap_blk, j = 0; i < superBlock.i_start_blk; i++, j++)
+	for(int i = superblock.d_bitmap_blk, j = 0; i < superblock.i_start_blk; i++, j++)
 		bio_write(i, dMap + j*BLOCKSIZE); 
 	//write root inode
-	bio_write(superBlock.i_start_blk, &tempNode);
+	bio_write(superblock.i_start_blk, &tempNode);
 
 	return 0;
 }
@@ -367,17 +367,17 @@ static void *tfs_init(struct fuse_conn_info *conn) {
 	else {
 		char* temp = malloc(BLOCKSIZE);
 		bio_read(0, temp);
-		superBlock = *(struct superblock*)temp;
+		superblock = *(struct superblock*)temp;
 		free(temp); //?
 		
 		//read in iMap
 		temp = malloc(BLOCKSIZE);
-		bio_read(superBlock.i_bitmap_blk, temp);
+		bio_read(superblock.i_bitmap_blk, temp);
 		iMap = (bitmap_t)temp;
 		
 		//read in dMap
 		temp = malloc(BLOCKSIZE);
-		bio_read(superBlock.d_bitmap_blk, temp);
+		bio_read(superblock.d_bitmap_blk, temp);
 		dMap = (bitmap_t)temp;
 	}
 
@@ -392,8 +392,6 @@ static void tfs_destroy(void *userdata) {
 	free(iMap);
 	free(dMap);
 
-	// Free superblock
-	free(superblock);
 	
 	// Step 2: Close diskfile
 	dev_close();
