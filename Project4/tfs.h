@@ -9,7 +9,6 @@
 #include <linux/limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdint.h>
 
 #ifndef _TFS_H
 #define _TFS_H
@@ -33,7 +32,7 @@ struct inode {
 	uint16_t	ino;				/* inode number */
 	uint16_t	valid;				/* validity of the inode */
 	uint32_t	size;				/* size of the file */
-	uint32_t	type;				/* type of the file */
+	uint32_t	type;				/* type of the file */ //0 for file, 1 for directory
 	uint32_t	link;				/* link count */
 	int			direct_ptr[16];		/* direct pointer to data block */
 	int			indirect_ptr[8];	/* indirect pointer to data block */
