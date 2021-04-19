@@ -31,6 +31,8 @@ bitmap_t dMap;
 char diskfile_path[PATH_MAX];
 
 // Declare your in-memory data structures here
+struct superblock superblock;
+
 
 /* 
  * Get available inode number from bitmap
@@ -38,12 +40,28 @@ char diskfile_path[PATH_MAX];
 int get_avail_ino() {
 
 	// Step 1: Read inode bitmap from disk
-	
+	char inodeBitmap[];
+	bio_read(superblock.i_bitmap_blk, inodeBitmap);
+
 	// Step 2: Traverse inode bitmap to find an available slot
+	int retVal = -1;
+
+	for(int i = 0; i < MAX_INUM; i++) {
+		if(get_bitmap(inodeBitmap, i) & 1){
+			// Set next avail inode number
+			retVal = i;
+
+			// Update bitmap
+			set_bitmap(inodeBitmap, i);
+			
+			break;
+		}
+	}
 
 	// Step 3: Update inode bitmap and write to disk 
+	bio_write(superblock.i_bitmap_blk, inodeBitmap);
 
-	return 0;
+	return retVal;
 }
 
 /* 
@@ -52,12 +70,28 @@ int get_avail_ino() {
 int get_avail_blkno() {
 
 	// Step 1: Read data block bitmap from disk
-	
+	char blockBitmap[];
+	bio_read(superblock.d_bitmap_blk, blockBitmap);
+
 	// Step 2: Traverse data block bitmap to find an available slot
+	int retVal = -1;
+
+	for(int i = 0; i < MAX_DNUM; i++) {
+		if(get_bitmap(blockBitmap, i) & 1){
+			// Set next avail data block number
+			retVal = i;
+
+			// Update bitmap
+			set_bitmap(blockBitmap, i);
+			
+			break;
+		}
+	}
 
 	// Step 3: Update data block bitmap and write to disk 
+	bio_write(superblock.i_bitmap_blk, blockBitmap);
 
-	return 0;
+	return retVal;
 }
 
 /* 
@@ -65,23 +99,70 @@ int get_avail_blkno() {
  */
 int readi(uint16_t ino, struct inode *inode) {
 
-  // Step 1: Get the inode's on-disk block number
+	int i, j, readRet = 0;
+	void *readBuf = NULL;
+	struct inode *temp;
 
-  // Step 2: Get offset of the inode in the inode on-disk block
+  	// Step 1: Get the inode's on-disk block number
+	// Iterate thru all inode blocks
+	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
+		// Read contents of block i - cast for easier manipulation
+		readRet = bio_read(i, readBuf);
+		readRet = (char*)readRet;
 
-  // Step 3: Read the block from disk and then copy into inode structure
+		// On successful read, go thru all inodes in single block (max of 16)
+		if(readRet > 0){
+			// Step 2: Get offset of the inode in the inode on-disk block
+			for(j = 0; j < 16; j++){
+				// Extract ith inode in readBuf and cast to struct inode
+				memcpy(temp, readBuf + (i * 256), 256);
+				temp = (struct inode*)temp;
 
+				// Step 3: Read the block from disk and then copy into inode structure
+				// Compare ith inode's number to desired number
+				if(temp->ino == ino){
+					inode = temp;
+					return 1;
+				}
+			}
+		}
+	}
 	return 0;
 }
 
 int writei(uint16_t ino, struct inode *inode) {
 
+	int i, j, readRet = 0;
+	void *readBuf = NULL;
+	struct inode *temp;
+
 	// Step 1: Get the block number where this inode resides on disk
-	
-	// Step 2: Get the offset in the block where this inode resides on disk
+	// Iterate thru all inode blocks
+	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
+		// Read contents of block i - cast for easier manipulation
+		readRet = bio_read(i, readBuf);
+		readRet = (char*)readRet;
 
-	// Step 3: Write inode to disk 
+		// On successful read, go thru all inodes in single block (max of 16)
+		if(readRet > 0){
+			// Step 2: Get the offset in the block where this inode resides on disk
+			for(j = 0; j < 16; j++){
+				// Extract ith inode in readBuf and cast to struct inode
+				memcpy(temp, readBuf + (i * 256), 256);
+				temp = (struct inode*)temp;
 
+				// Step 3: Write inode to disk
+				// Compare ith inode's number to desired number
+				if(temp->ino == ino){
+					// Overwrite read inode with given inode in buffer
+					// Write entire buffer to disk
+					memcpy(readBuf + (i * 256), inode, 256);
+					bio_write(i, readBuf);
+					return 1;
+				}
+			}
+		}
+	}
 	return 0;
 }
 
@@ -307,8 +388,15 @@ static void tfs_destroy(void *userdata) {
 
 	// Step 1: De-allocate in-memory data structures
 
-	// Step 2: Close diskfile
+	// Free the bitmaps
+	free(iMap);
+	free(dMap);
 
+	// Free superblock
+	free(superblock);
+	
+	// Step 2: Close diskfile
+	dev_close();
 }
 
 static int tfs_getattr(const char *path, struct stat *stbuf) {
@@ -452,31 +540,6 @@ static int tfs_unlink(const char *path) {
 	return 0;
 }
 
-static int tfs_truncate(const char *path, off_t size) {
-	// For this project, you don't need to fill this function
-	// But DO NOT DELETE IT!
-    return 0;
-}
-
-static int tfs_release(const char *path, struct fuse_file_info *fi) {
-	// For this project, you don't need to fill this function
-	// But DO NOT DELETE IT!
-	return 0;
-}
-
-static int tfs_flush(const char * path, struct fuse_file_info * fi) {
-	// For this project, you don't need to fill this function
-	// But DO NOT DELETE IT!
-    return 0;
-}
-
-static int tfs_utimens(const char *path, const struct timespec tv[2]) {
-	// For this project, you don't need to fill this function
-	// But DO NOT DELETE IT!
-    return 0;
-}
-
-
 static struct fuse_operations tfs_ope = {
 	.init		= tfs_init,
 	.destroy	= tfs_destroy,
@@ -512,3 +575,10 @@ int main(int argc, char *argv[]) {
 	return fuse_stat;
 }
 
+
+// For this project, you don't need to fill these functions
+// But DO NOT DELETE THEM!
+static int tfs_truncate(const char *path, off_t size) {return 0;}
+static int tfs_release(const char *path, struct fuse_file_info *fi) {return 0;}
+static int tfs_flush(const char * path, struct fuse_file_info * fi) {return 0;}
+static int tfs_utimens(const char *path, const struct timespec tv[2]) {return 0;}
