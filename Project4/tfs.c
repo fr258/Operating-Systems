@@ -115,7 +115,7 @@ int readi(uint16_t ino, struct inode *inode) {
 			// Step 2: Get offset of the inode in the inode on-disk block
 			for(j = 0; j < 16; j++){
 				// Extract ith inode in readBuf and cast to struct inode
-				memcpy(temp, readBuf + (i * 256), 256);
+				memcpy(temp, readBuf + (j * 256), 256);
 				temp = (struct inode*)temp;
 
 				// Step 3: Read the block from disk and then copy into inode structure
@@ -141,7 +141,7 @@ int writei(uint16_t ino, struct inode *inode) {
 	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
 		// Read contents of block i - cast for easier manipulation
 		readRet = bio_read(i, readBuf);
-		readRet = (char*)readRet;
+		readBuf = (char*)readRet;
 
 		// On successful read, go thru all inodes in single block (max of 16)
 		if(readRet > 0){
@@ -320,13 +320,52 @@ int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 /* 
  * namei operation
  */
+//int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *dirent) {
 int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
+	return get_node_by_path_helper(path, 0, ino, inode);
+}
+int get_node_by_path_helper(const char *path, int currLength, uint16_t ino, struct inode *inode) {
 	
 	// Step 1: Resolve the path name, walk through path, and finally, find its inode.
-	// Note: You could either implement it in a iterative way or recursive way
 
-	return 0;
+	// Get next name in path
+	// Extract <next> from <next>/<nextNext>/<nextNextNext>/...
+	char currPath[208];
+	int i = 0;
+	
+	// Find next delimiter/end of path
+	for(i = currLength; i < 208 && path[i] != '/0' && path[i] != "/"; i++);
+	currLength = i;
+
+	// Make sure path is not an empty string
+	if(currLength == 0){
+		inode = NULL;
+		return -1;
+	}
+
+	// Copy currLength bytes into currPath
+	memcpy(currPath, path, currLength);
+
+	// Find currPath's dir inside given ino's dir
+	struct dirent *nextDirent;
+	int ret = dir_find(ino, currPath, currLength, nextDirent);
+
+	// Couldn't find subdirectory/subfile name within directory number ino
+	if(ret == 0 || nextDirent == NULL){
+		inode = NULL;
+		return -1;
+	}
+	
+	// Base case: after extracting currPath's inode, check if currPath == path
+	if(strcmp(path, currPath) == 0){
+		inode = nextDirent->ino;
+		return 1;
+	}
+	// Recurse on next segment of the path
+	return get_node_by_path(path, currLength, nextDirent->ino, inode);
 }
+
+
 
 /* 
  * Make file system
@@ -431,7 +470,6 @@ static void tfs_destroy(void *userdata) {
 	// Free the bitmaps
 	free(iMap);
 	free(dMap);
-
 	
 	// Step 2: Close diskfile
 	dev_close();
@@ -440,6 +478,8 @@ static void tfs_destroy(void *userdata) {
 static int tfs_getattr(const char *path, struct stat *stbuf) {
 
 	// Step 1: call get_node_by_path() to get inode from path
+	struct inode* inode;
+	int ret = get_node_by_path(path, 0, inode);
 
 	// Step 2: fill attribute of file into stbuf from inode
 
@@ -447,24 +487,79 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 	stbuf->st_nlink  = 2;
 	time(&stbuf->st_mtime);
 
+	// must right error code on fail - returns "no such file or directory found"
+	if(ret == -1){
+		return ENOENT;
+	}
+
+	// Step 2: fill attribute of file into stbuf from inode
+	// st_dev
+	stbuf->st_ino 	 = inode->ino;
+	stbuf->st_mode   = inode->vstat.st_mode;
+	stbuf->st_nlink  = inode->vstat.st_nlink;
+	stbuf->st_uid 	 = getuid();
+	stbuf->st_gid	 = getgid();
+	// st_rdev
+	stbuf->st_size	 = inode->size;
+	// stbuf->st_blksize = 4096
+	
+	time(&stbuf->st_atime);
+	time(&stbuf->st_mtime);
+	// stbuf->st_ctim?
 	return 0;
 }
 
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 
 	// Step 1: Call get_node_by_path() to get inode from path
-
+	struct inode *inode;
 	// Step 2: If not find, return -1
-
-    return 0;
+    return get_node_by_path(path, 0, inode);
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
 
 	// Step 1: Call get_node_by_path() to get inode from path
-
+	struct inode *inode;
+    int ret = get_node_by_path(path, 0, inode);
+	// Fail if path doesn't exist
+	if(ret == -1){
+		return ENOENT;
+	}
 	// Step 2: Read directory entries from its data blocks, and copy them to filler
 
+	// If inode pointed to by path is a file, break
+	if(inode->type == 0){
+		printf("Inputted a file when expected directory.\n");
+		return ENOENT;
+	}
+
+	// Continue as normal if given a directory
+	int *datablocks = inode->direct_ptr;
+	int currBlockNum;
+	int i, j;
+	void* readBuf = malloc(BLOCK_SIZE);
+	struct dirent* currDirent;
+	int direntSize = sizeof(struct dirent);
+	// Traverse all datablocks of given inode
+	for(i = 0; i < 16; i++){
+		currBlockNum = datablocks[i];
+		// Check if inode uses the ith block
+		if(currBlockNum != -1){
+			bio_read(currBlockNum, readBuf);
+			// Traverse all 16 possible dirent structs in current block
+			for(j = 0; j < BLOCK_SIZE / direntSize; j++){
+				memcpy(currDirent, readBuf + (j * direntSize), direntSize);
+				currDirent = (struct dirent*)currDirent;
+
+				// Check if this section of the data block is in use
+				if(currDirent->valid == 0){
+					continue;
+				}
+				filler(buffer, currDirent->name, NULL, 0);
+			}
+		}
+	}
 	return 0;
 }
 
@@ -472,17 +567,63 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 static int tfs_mkdir(const char *path, mode_t mode) {
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target directory name
+	char *dcopy, *bcopy, *dname, *bname;
+	dcopy = strdup(path);
+	bcopy = strdup(path);
+	dname = dirname(dcopy);
+	bname = basename(bcopy);
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
+	struct inode *inode;
+	int get_node_ret = get_node_by_path(dname, 0, inode);
+
+	// Check if directory inode was returned
+	if(get_node_ret < 0 || inode == NULL || inode->type == 0){
+		printf("parent dir doesn't exist\n");
+		return -1;
+	}
+
+	// Check if bname is already a file/dir in parent directory
+	int i,j;
+	int direntSize = sizeof(struct dirent);
+	char *readBuffer[BLOCK_SIZE];
+	struct inode *itemp = malloc(sizeof(struct inode));
+	struct dirent *dtemp;
+	for(i = 0; i < 16; i++){
+		// Skip unused ptrs
+		if(inode->direct_ptr[i] < 0){
+			continue;
+		}
+		// Read in data block - check if read correctly
+		int readRet = bio_read(inode->direct_ptr[i], readBuffer);
+		if(readRet < 0){
+			printf("bad block read\n");
+			continue;
+		}
+		// Traverse dirent entries in each positive data block
+		for(j = 0; j < BLOCK_SIZE / direntSize; j++){
+			memcpy(dtemp, readBuffer + (j * direntSize), direntSize);
+			
+			// Check if bname already exists in dname's directory
+			if(strcmp(dtemp->name, path) == 0){
+				printf("name already exists\n");
+				return -1;
+			}
+		}
+	}
 
 	// Step 3: Call get_avail_ino() to get an available inode number
+	int get_avail_ret = get_avail_ino();
 
 	// Step 4: Call dir_add() to add directory entry of target directory to parent directory
+	int dir_add_ret = dir_add(inode, get_avail_ret, bname, strlen(bname));
 
 	// Step 5: Update inode for target directory
+	inode->ino = get_avail_ret;
+	inode->type = 1;
 
 	// Step 6: Call writei() to write inode to disk
-	
+	writei(get_avail_ret, inode);
 
 	return 0;
 }
@@ -501,25 +642,66 @@ static int tfs_rmdir(const char *path) {
 	return 0;
 }
 
-static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {
-	// For this project, you don't need to fill this function
-	// But DO NOT DELETE IT!
-    return 0;
-}
-
 static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target file name
+	char *dcopy, *bcopy, *dname, *bname;
+	dcopy = strdup(path);
+	bcopy = strdup(path);
+	dname = dirname(dcopy);
+	bname = basename(bcopy);
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
+	struct inode *inode;
+	int get_node_ret = get_node_by_path(dname, 0, inode);
+
+	// Check if directory inode was returned
+	if(get_node_ret < 0 || inode == NULL || inode->type == 0){
+		printf("parent dir doesn't exist\n");
+		return -1;
+	}
+
+	// Check if bname is already a file/dir in parent directory
+	int i,j;
+	int direntSize = sizeof(struct dirent);
+	char *readBuffer[BLOCK_SIZE];
+	struct inode *itemp = malloc(sizeof(struct inode));
+	struct dirent *dtemp;
+	for(i = 0; i < 16; i++){
+		// Skip unused ptrs
+		if(inode->direct_ptr[i] < 0){
+			continue;
+		}
+		// Read in data block - check if read correctly
+		int readRet = bio_read(inode->direct_ptr[i], readBuffer);
+		if(readRet < 0){
+			printf("bad block read\n");
+			continue;
+		}
+		// Traverse dirent entries in each positive data block
+		for(j = 0; j < BLOCK_SIZE / direntSize; j++){
+			memcpy(dtemp, readBuffer + (j * direntSize), direntSize);
+			
+			// Check if bname already exists in dname's directory
+			if(strcmp(dtemp->name, path) == 0){
+				printf("name already exists\n");
+				return -1;
+			}
+		}
+	}
 
 	// Step 3: Call get_avail_ino() to get an available inode number
+	int get_avail_ret = get_avail_ino();
 
 	// Step 4: Call dir_add() to add directory entry of target file to parent directory
+	int dir_add_ret = dir_add(inode, get_avail_ret, bname, strlen(bname));
 
 	// Step 5: Update inode for target file
+	inode->ino = get_avail_ret;
+	inode->type = 0;
 
 	// Step 6: Call writei() to write inode to disk
+	writei(get_avail_ret, inode);
 
 	return 0;
 }
@@ -707,6 +889,7 @@ int main(int argc, char *argv[]) {
 
 // For this project, you don't need to fill these functions
 // But DO NOT DELETE THEM!
+static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {return 0;}
 static int tfs_truncate(const char *path, off_t size) {return 0;}
 static int tfs_release(const char *path, struct fuse_file_info *fi) {return 0;}
 static int tfs_flush(const char * path, struct fuse_file_info * fi) {return 0;}
