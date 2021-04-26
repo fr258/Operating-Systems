@@ -260,7 +260,6 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 					}
 				}
 			}
-			
 		}
 		struct dirent dirent;
 		dirent.ino = f_ino;
@@ -637,7 +636,14 @@ static int tfs_rmdir(const char *path) {
 	// Step 4: Clear inode bitmap and its data block
 	// Step 5: Call get_node_by_path() to get inode of parent directory
 	// Step 6: Call dir_remove() to remove directory entry of target directory in its parent directory
-	
+	int is_empty = 1;
+	struct inode inode;
+	get_node_by_path(path, 0, &inode);
+	for(int i = 0; i < 16; i++) {
+		if(inode.direct_ptr[i] != 0) {
+			printf("%s %s%s\n","rm: cannot remove ", basename(path),": Is a directory");
+		}
+	}
 	unlink(path);
 
 	return 0;
