@@ -642,6 +642,7 @@ static int tfs_rmdir(const char *path) {
 	for(int i = 0; i < 16; i++) {
 		if(inode.direct_ptr[i] != 0) {
 			printf("%s %s%s\n","rm: cannot remove ", basename(path),": Is a directory");
+			return 1;
 		}
 	}
 	unlink(path);
