@@ -254,12 +254,12 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 					struct dirent temp_dirent;
 					temp_dirent.valid = 0;
 					//format new data block
-					for(int i = 0; i < size; i++) {
-						memcpy(temp_block[i], temp_dirent, sizeof(struct dirent)); 
+					int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
+					for(int i = 0; i < dirents_per_block; i++) {
+						memcpy(&temp_block[i], &temp_dirent, sizeof(struct dirent)); 
 					}
 				}
 			}
-			
 		}
 		struct dirent dirent;
 		dirent.ino = f_ino;
@@ -412,7 +412,7 @@ int tfs_mkfs() {
 	tempNode.size = 1;				/* size of the file */
 	tempNode.type = 1;				/* type of the file */
 	tempNode.link = 2;				/* link count */
-	for(int i = 0; i < 16; i++) { /* direct pointer to data block */
+	for(int i = 1; i < 16; i++) { /* direct pointer to data block */
 		tempNode.direct_ptr[i] = 0;
 	}	
 //	tempNode.indirect_ptr[8];	/* indirect pointer to data block */
@@ -642,7 +642,15 @@ static int tfs_rmdir(const char *path) {
 	// Step 4: Clear inode bitmap and its data block
 	// Step 5: Call get_node_by_path() to get inode of parent directory
 	// Step 6: Call dir_remove() to remove directory entry of target directory in its parent directory
-	
+	int is_empty = 1;
+	struct inode inode;
+	get_node_by_path(path, 0, &inode);
+	for(int i = 0; i < 16; i++) {
+		if(inode.direct_ptr[i] != 0) {
+			printf("%s %s%s\n","rm: cannot remove ", basename(path),": Is a directory");
+			return 1;
+		}
+	}
 	unlink(path);
 
 	return 0;
