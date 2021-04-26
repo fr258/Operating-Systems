@@ -108,7 +108,7 @@ int readi(uint16_t ino, struct inode *inode) {
 	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
 		// Read contents of block i - cast for easier manipulation
 		readRet = bio_read(i, readBuf);
-		readRet = (char*)readRet;
+		readBuf = (char*)readBuf;
 
 		// On successful read, go thru all inodes in single block (max of 16)
 		if(readRet > 0){
@@ -141,7 +141,7 @@ int writei(uint16_t ino, struct inode *inode) {
 	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
 		// Read contents of block i - cast for easier manipulation
 		readRet = bio_read(i, readBuf);
-		readBuf = (char*)readRet;
+		readBuf = (char*)readBuf;
 
 		// On successful read, go thru all inodes in single block (max of 16)
 		if(readRet > 0){
@@ -320,10 +320,6 @@ int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 /* 
  * namei operation
  */
-//int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *dirent) {
-int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
-	return get_node_by_path_helper(path, 0, ino, inode);
-}
 int get_node_by_path_helper(const char *path, int currLength, uint16_t ino, struct inode *inode) {
 	
 	// Step 1: Resolve the path name, walk through path, and finally, find its inode.
@@ -334,7 +330,7 @@ int get_node_by_path_helper(const char *path, int currLength, uint16_t ino, stru
 	int i = 0;
 	
 	// Find next delimiter/end of path
-	for(i = currLength; i < 208 && path[i] != '/0' && path[i] != "/"; i++);
+	for(i = currLength; i < 208 && path[i] != '\0' && path[i] != '/'; i++);
 	currLength = i;
 
 	// Make sure path is not an empty string
@@ -358,12 +354,18 @@ int get_node_by_path_helper(const char *path, int currLength, uint16_t ino, stru
 	
 	// Base case: after extracting currPath's inode, check if currPath == path
 	if(strcmp(path, currPath) == 0){
-		inode = nextDirent->ino;
+		if(readi(nextDirent->ino, inode) < 0)
+			return -1;
 		return 1;
 	}
 	// Recurse on next segment of the path
-	return get_node_by_path(path, currLength, nextDirent->ino, inode);
+	return get_node_by_path_helper(path, currLength, nextDirent->ino, inode);
 }
+
+int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
+	return get_node_by_path_helper(path, 0, ino, inode);
+}
+
 
 
 
@@ -587,7 +589,6 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 	int i,j;
 	int direntSize = sizeof(struct dirent);
 	char *readBuffer[BLOCK_SIZE];
-	struct inode *itemp = malloc(sizeof(struct inode));
 	struct dirent *dtemp;
 	for(i = 0; i < 16; i++){
 		// Skip unused ptrs
@@ -616,14 +617,19 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 	int get_avail_ret = get_avail_ino();
 
 	// Step 4: Call dir_add() to add directory entry of target directory to parent directory
-	int dir_add_ret = dir_add(inode, get_avail_ret, bname, strlen(bname));
-
+	int dir_add_ret = dir_add(*inode, get_avail_ret, bname, strlen(bname));
+	if(dir_add_ret < 0){
+		printf("couldn't add dir\n");
+		return -1;
+	}
 	// Step 5: Update inode for target directory
 	inode->ino = get_avail_ret;
 	inode->type = 1;
 
 	// Step 6: Call writei() to write inode to disk
 	writei(get_avail_ret, inode);
+
+	free(inode);
 
 	return 0;
 }
@@ -665,7 +671,6 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	int i,j;
 	int direntSize = sizeof(struct dirent);
 	char *readBuffer[BLOCK_SIZE];
-	struct inode *itemp = malloc(sizeof(struct inode));
 	struct dirent *dtemp;
 	for(i = 0; i < 16; i++){
 		// Skip unused ptrs
@@ -694,8 +699,11 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	int get_avail_ret = get_avail_ino();
 
 	// Step 4: Call dir_add() to add directory entry of target file to parent directory
-	int dir_add_ret = dir_add(inode, get_avail_ret, bname, strlen(bname));
-
+	int dir_add_ret = dir_add(*inode, get_avail_ret, bname, strlen(bname));
+	if(dir_add_ret < 0){
+		printf("couldn't add dir\n");
+		return -1;
+	}
 	// Step 5: Update inode for target file
 	inode->ino = get_avail_ret;
 	inode->type = 0;
@@ -851,6 +859,14 @@ static int tfs_unlink(const char *path) {
 	return 0;
 }
 
+// For this project, you don't need to fill these functions
+// But DO NOT DELETE THEM!
+static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {return 0;}
+static int tfs_truncate(const char *path, off_t size) {return 0;}
+static int tfs_release(const char *path, struct fuse_file_info *fi) {return 0;}
+static int tfs_flush(const char * path, struct fuse_file_info * fi) {return 0;}
+static int tfs_utimens(const char *path, const struct timespec tv[2]) {return 0;}
+
 static struct fuse_operations tfs_ope = {
 	.init		= tfs_init,
 	.destroy	= tfs_destroy,
@@ -885,12 +901,3 @@ int main(int argc, char *argv[]) {
 
 	return fuse_stat;
 }
-
-
-// For this project, you don't need to fill these functions
-// But DO NOT DELETE THEM!
-static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {return 0;}
-static int tfs_truncate(const char *path, off_t size) {return 0;}
-static int tfs_release(const char *path, struct fuse_file_info *fi) {return 0;}
-static int tfs_flush(const char * path, struct fuse_file_info * fi) {return 0;}
-static int tfs_utimens(const char *path, const struct timespec tv[2]) {return 0;}
