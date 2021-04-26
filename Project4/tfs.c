@@ -254,8 +254,9 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 					struct dirent temp_dirent;
 					temp_dirent.valid = 0;
 					//format new data block
-					for(int i = 0; i < size; i++) {
-						memcpy(temp_block[i], temp_dirent, sizeof(struct dirent)); 
+					int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
+					for(int i = 0; i < dirents_per_block; i++) {
+						memcpy(&temp_block[i], &temp_dirent, sizeof(struct dirent)); 
 					}
 				}
 			}
@@ -410,7 +411,7 @@ int tfs_mkfs() {
 	tempNode.size = 1;				/* size of the file */
 	tempNode.type = 1;				/* type of the file */
 	tempNode.link = 2;				/* link count */
-	for(int i = 0; i < 16; i++) { /* direct pointer to data block */
+	for(int i = 1; i < 16; i++) { /* direct pointer to data block */
 		tempNode.direct_ptr[i] = 0;
 	}	
 //	tempNode.indirect_ptr[8];	/* indirect pointer to data block */
