@@ -89,7 +89,7 @@ int get_avail_blkno() {
 	}
 
 	// Step 3: Update data block bitmap and write to disk 
-	bio_write(superblock.i_bitmap_blk, dMap);
+	bio_write(superblock.d_bitmap_blk, dMap);
 
 	return retVal;
 }
@@ -97,14 +97,18 @@ int get_avail_blkno() {
 /* 
  * inode operations
  */
+// Returns -1 upon not finding the ino number
+// Returns 1 upon finding the corresponding inode and sets the inode pointer
+// *inode points to heap memory - must be freed by caller
 int readi(uint16_t ino, struct inode *inode) {
 
-	int i, j, readRet = 0;
-	void *readBuf = NULL;
-	struct inode *temp;
+	int i, j, readRet = 0, inodeSize = sizeof(struct inode);
+	void *readBuf = malloc(BLOCK_SIZE);
+	struct inode *tempInode;
 
   	// Step 1: Get the inode's on-disk block number
 	// Iterate thru all inode blocks
+	// Assumes inode blocks are stored before data blocks
 	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
 		// Read contents of block i - cast for easier manipulation
 		readRet = bio_read(i, readBuf);
@@ -113,31 +117,37 @@ int readi(uint16_t ino, struct inode *inode) {
 		// On successful read, go thru all inodes in single block (max of 16)
 		if(readRet > 0){
 			// Step 2: Get offset of the inode in the inode on-disk block
-			for(j = 0; j < 16; j++){
-				// Extract ith inode in readBuf and cast to struct inode
-				memcpy(temp, readBuf + (j * 256), 256);
-				temp = (struct inode*)temp;
+			for(j = 0; j < BLOCK_SIZE / inodeSize; j++){
+				// Extract jth inode in readBuf and cast to struct inode
+				memcpy(tempInode, readBuf + (j * inodeSize), inodeSize);
+				tempInode = (struct inode*)tempInode;
 
 				// Step 3: Read the block from disk and then copy into inode structure
 				// Compare ith inode's number to desired number
-				if(temp->ino == ino){
-					inode = temp;
+				if(tempInode->ino == ino){
+					inode = tempInode;
+					free(readBuf);
 					return 1;
 				}
 			}
 		}
 	}
-	return 0;
+	free(readBuf);
+	return -1;
 }
 
+// Returns -1 upon not finding the ino number
+// Returns 1 upon finding the corresponding inode and sets the inode pointer
+// *inode points to heap memory - must be freed by caller
 int writei(uint16_t ino, struct inode *inode) {
 
-	int i, j, readRet = 0;
-	void *readBuf = NULL;
-	struct inode *temp;
+	int i, j, readRet = 0, inodeSize = sizeof(struct inode);
+	void *readBuf = malloc(BLOCK_SIZE);
+	struct inode *tempInode;
 
-	// Step 1: Get the block number where this inode resides on disk
+  	// Step 1: Get the inode's on-disk block number
 	// Iterate thru all inode blocks
+	// Assumes inode blocks are stored before data blocks
 	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
 		// Read contents of block i - cast for easier manipulation
 		readRet = bio_read(i, readBuf);
@@ -145,26 +155,30 @@ int writei(uint16_t ino, struct inode *inode) {
 
 		// On successful read, go thru all inodes in single block (max of 16)
 		if(readRet > 0){
-			// Step 2: Get the offset in the block where this inode resides on disk
-			for(j = 0; j < 16; j++){
-				// Extract ith inode in readBuf and cast to struct inode
-				memcpy(temp, readBuf + (i * 256), 256);
-				temp = (struct inode*)temp;
+			// Step 2: Get offset of the inode in the inode on-disk block
+			for(j = 0; j < BLOCK_SIZE / inodeSize; j++){
+				// Extract jth inode in readBuf and cast to struct inode
+				memcpy(tempInode, readBuf + (j * inodeSize), inodeSize);
+				tempInode = (struct inode*)tempInode;
 
-				// Step 3: Write inode to disk
+				// Step 3: Read the block from disk and then copy into inode structure
 				// Compare ith inode's number to desired number
-				if(temp->ino == ino){
+				if(tempInode->ino == ino){
 					// Overwrite read inode with given inode in buffer
 					// Write entire buffer to disk
-					memcpy(readBuf + (i * 256), inode, 256);
+					memcpy(readBuf + (j * inodeSize), inode, inodeSize);
 					bio_write(i, readBuf);
+					free(readBuf);
 					return 1;
 				}
 			}
 		}
 	}
-	return 0;
+	free(readBuf);
+	return -1;
 }
+
+
 
 
 /* 
@@ -320,53 +334,58 @@ int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 /* 
  * namei operation
  */
-int get_node_by_path_helper(const char *path, int currLength, uint16_t ino, struct inode *inode) {
-	
-	// Step 1: Resolve the path name, walk through path, and finally, find its inode.
-
+// Given path of <dir1>/<dir2>/<dir3>/<file>, returns the inode of <file>
+// Upon verifying <dir1> exists in current root directory, 
+	// passes <dir2>/<dir3>/<file> into next iteration
+// Assumes it is always given the total root directory's inode number, 0
+// Sets *inode to point to <file>'s inode, which is stored in heap memory
+	// and must be freed by the caller
+// Returns -1 upon early termination, unable to find nextName in current directory
+int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// Get next name in path
 	// Extract <next> from <next>/<nextNext>/<nextNextNext>/...
-	char currPath[208];
-	int i = 0;
+	char nextName[208], nextPath[208];
+	int i, j;
+	// Copy chars into nextName until next delimiter or end of path
+	for(i = 0; i < 208 && path[i] != '\0' && path[i] != '/'; i++){
+		nextName[i] = path[i];
+	}
+	// End string with null terminator
+	nextName[i] = '\0';
+
+	// Extract <nextNext>/<nextNextNext>/... from <next>/<nextNext>/<nextNextNext>/...
+	for(j = i; j < 208 && path[j] != '\0'; j++){
+		nextPath[j-i] = path[j];
+	}
 	
-	// Find next delimiter/end of path
-	for(i = currLength; i < 208 && path[i] != '\0' && path[i] != '/'; i++);
-	currLength = i;
 
 	// Make sure path is not an empty string
-	if(currLength == 0){
+	if(i == 0){
 		inode = NULL;
 		return -1;
 	}
-
-	// Copy currLength bytes into currPath
-	memcpy(currPath, path, currLength);
 
 	// Find currPath's dir inside given ino's dir
 	struct dirent *nextDirent = malloc(sizeof(struct dirent));
-	int ret = dir_find(ino, currPath, currLength, nextDirent);
-	int dirInodeNumber = nextDirent->ino;
+	int ret = dir_find(ino, nextName, i, nextDirent);
 
 	// Couldn't find subdirectory/subfile name within directory number ino
-	if(ret == 0 || nextDirent == NULL){
+	if(ret == 0 || nextDirent == NULL || nextDirent ->valid < 0){
 		inode = NULL;
 		return -1;
 	}
 	
-	// Base case: after extracting currPath's inode, check if currPath == path
-	if(strcmp(path, currPath) == 0){
+	// Base case: after extracting currPath's inode, check if basename(path) == nextName
+	// Not the best since a path of "test/good/bad/test/good" would return (directory) good's inode
+	// Later: maybe it wouldn't since the path still has "/bad/test/good" appended to good
+	if(strcmp(basename((char*)path), nextName) == 0){
+		int dirInodeNumber = nextDirent->ino;
 		free(nextDirent);
-		if(readi(dirInodeNumber, inode) < 0){
-			return -1;
-		}
-		return 1;
+		// readi returns -1 on fail, 1 on success
+		return readi(dirInodeNumber, inode);
 	}
 	// Recurse on next segment of the path
-	return get_node_by_path_helper(path, currLength, nextDirent->ino, inode);
-}
-
-int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
-	return get_node_by_path_helper(path, 0, ino, inode);
+	return get_node_by_path(nextPath, nextDirent->ino, inode);
 }
 
 
@@ -480,37 +499,36 @@ static void tfs_destroy(void *userdata) {
 	dev_close();
 }
 
+// Assumes a malloc'd stat struct has been passed in and must be freed by caller
+// Returns 0 on success, ENOENT on failure to find file
 static int tfs_getattr(const char *path, struct stat *stbuf) {
 
 	// Step 1: call get_node_by_path() to get inode from path
-	struct inode* inode = NULL;
-	int ret = get_node_by_path(path, 0, inode);
-
-	// Step 2: fill attribute of file into stbuf from inode
-
-	stbuf->st_mode   = S_IFDIR | 0755;
-	stbuf->st_nlink  = 2;
-	time(&stbuf->st_mtime);
-
 	// must right error code on fail - returns "no such file or directory found"
-	if(ret == -1){
+	struct inode* inode = NULL;
+	if(get_node_by_path(path, 0, inode) == -1){
+		printf("File at path DNE\n");
+		free(inode);
 		return ENOENT;
 	}
 
 	// Step 2: fill attribute of file into stbuf from inode
-	// st_dev
+	// st_dev - ID of device containing file
 	stbuf->st_ino 	 = inode->ino;
 	stbuf->st_mode   = inode->vstat.st_mode;
 	stbuf->st_nlink  = inode->vstat.st_nlink;
 	stbuf->st_uid 	 = getuid();
 	stbuf->st_gid	 = getgid();
-	// st_rdev
+	// st_rdev - device ID (if special file)
 	stbuf->st_size	 = inode->size;
 	// stbuf->st_blksize = 4096
+	// stbuf->st_blocks - number of 512B blocks allocated
 	
 	time(&stbuf->st_atime);
 	time(&stbuf->st_mtime);
 	// stbuf->st_ctim?
+
+	free(inode);
 	return 0;
 }
 
@@ -518,8 +536,12 @@ static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 
 	// Step 1: Call get_node_by_path() to get inode from path
 	struct inode *inode = NULL;
+	// Sets to 1 on success, -1 on failure
+	int ret = get_node_by_path(path, 0, inode);
+
 	// Step 2: If not find, return -1
-    return get_node_by_path(path, 0, inode);
+	free(inode);
+    return ret;
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
@@ -529,42 +551,52 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
     int ret = get_node_by_path(path, 0, inode);
 	// Fail if path doesn't exist
 	if(ret == -1){
+		free(inode);
 		return ENOENT;
 	}
+
 	// Step 2: Read directory entries from its data blocks, and copy them to filler
 
-	// If inode pointed to by path is a file, break
+	// If inode pointed to by path is a file, it should fill buffer with file's name then return
+	// but idk how to get the file name from an inode
 	if(inode->type == 0){
 		printf("Inputted a file when expected directory.\n");
 		return ENOENT;
 	}
 
 	// Continue as normal if given a directory
-	int *datablocks = inode->direct_ptr;
-	int currBlockNum;
 	int i, j;
-	void* readBuf = malloc(BLOCK_SIZE);
-	struct dirent* currDirent;
 	int direntSize = sizeof(struct dirent);
-	// Traverse all datablocks of given inode
-	for(i = 0; i < 16; i++){
-		currBlockNum = datablocks[i];
-		// Check if inode uses the ith block
-		if(currBlockNum != -1){
-			bio_read(currBlockNum, readBuf);
-			// Traverse all 16 possible dirent structs in current block
-			for(j = 0; j < BLOCK_SIZE / direntSize; j++){
-				memcpy(currDirent, readBuf + (j * direntSize), direntSize);
-				currDirent = (struct dirent*)currDirent;
+	char readBuffer[BLOCK_SIZE];
+	struct dirent *dtemp = malloc(direntSize);
 
-				// Check if this section of the data block is in use
-				if(currDirent->valid == 0){
-					continue;
-				}
-				filler(buffer, currDirent->name, NULL, 0);
+	// Traverse all datablocks, which contain dirents, of the returned inode
+	// i -> [0,16) since inodes have 16 direct ptrs
+	for(i = 0; i < 16; i++){
+		// Skip unused ptrs
+		if(inode->direct_ptr[i] < 0){
+			continue;
+		}
+		// Read in data block - check if read correctly
+		int readRet = bio_read(inode->direct_ptr[i], readBuffer);
+		if(readRet < 0){
+			printf("bad block read\n");
+			continue;
+		}
+
+		// Traverse dirent entries in each positive data block
+		for(j = 0; j < BLOCK_SIZE / direntSize; j++){
+			memcpy(dtemp, readBuffer + (j * direntSize), direntSize);
+			
+			// Check if this section of the data block is in use
+			if(dtemp->valid == 1){
+				filler(buffer, dtemp->name, NULL, 0);
 			}
 		}
 	}
+
+	free(inode);
+	free(dtemp);
 	return 0;
 }
 
@@ -582,17 +614,20 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 	struct inode *inode = NULL;
 	int get_node_ret = get_node_by_path(dname, 0, inode);
 
-	// Check if directory inode was returned
+	// Check if directory inode was returned or if it is a file
 	if(get_node_ret < 0 || inode == NULL || inode->type == 0){
 		printf("parent dir doesn't exist\n");
+		free(inode);
 		return -1;
 	}
 
-	// Check if bname is already a file/dir in parent directory
-	int i,j;
+	int i, j;
 	int direntSize = sizeof(struct dirent);
-	char *readBuffer[BLOCK_SIZE];
+	char readBuffer[BLOCK_SIZE];
 	struct dirent *dtemp = malloc(direntSize);
+
+	// Traverse all datablocks, which contain dirents, of the returned inode
+	// i -> [0,16) since inodes have 16 direct ptrs
 	for(i = 0; i < 16; i++){
 		// Skip unused ptrs
 		if(inode->direct_ptr[i] < 0){
@@ -604,13 +639,16 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 			printf("bad block read\n");
 			continue;
 		}
+
 		// Traverse dirent entries in each positive data block
 		for(j = 0; j < BLOCK_SIZE / direntSize; j++){
 			memcpy(dtemp, readBuffer + (j * direntSize), direntSize);
 			
 			// Check if bname already exists in dname's directory
-			if(strcmp(dtemp->name, path) == 0){
+			if(strcmp(dtemp->name, bname) == 0){
 				printf("name already exists\n");
+				free(inode);
+				free(dtemp);
 				return -1;
 			}
 		}
@@ -625,15 +663,15 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 		printf("couldn't add dir\n");
 		return -1;
 	}
+
 	// Step 5: Update inode for target directory
 	inode->ino = get_avail_ret;
 	inode->type = 1;
+	inode->vstat.st_mode = mode;
 
 	// Step 6: Call writei() to write inode to disk
 	writei(get_avail_ret, inode);
-
 	free(inode);
-
 	return 0;
 }
 
@@ -732,8 +770,6 @@ static int tfs_open(const char *path, struct fuse_file_info *fi) {
 	struct inode inode;
 	if(get_node_by_path(path, 0, &inode) != 0) return -1;
 	if(inode.valid == 0) return -1;
-
-
 
 	return 0;
 }
