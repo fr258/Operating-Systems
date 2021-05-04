@@ -807,10 +807,10 @@ static int tfs_open(const char *path, struct fuse_file_info *fi) {
 	// Step 2: If not find, return -1
 	struct inode *inode = malloc(sizeof(struct inode));
 	int ret = 0;
-	if(get_node_by_path(path, 0, &inode) != 0){
+	if(get_node_by_path(path, 0, inode) != 0){
 		ret = -1;
 	}
-	if(inode.valid == 0){
+	if(inode->valid == 0){
 		ret = -1;
 	}
 
@@ -875,7 +875,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 
 	// Step 1: You could call get_node_by_path() to get inode from path
 	if(tfs_open(path, fi) == 0) {
-		struct inode *inode;
+		struct inode *inode = malloc(sizeof(inode));
 		int ret = get_node_by_path(path, 0, inode);
 		if(ret == -1){
 			printf("file DNE in write.\n");
@@ -971,7 +971,7 @@ static int tfs_unlink(const char *path) {
 		return -1;
 	}
 	// Step 6: Call dir_remove() to remove directory entry of target file in its parent directory
-	dir_remove(inodeParent, base_name, strlen(base_name));
+	dir_remove(*inodeParent, base_name, strlen(base_name));
 
 	free(inode);
 	free(inodeParent);
