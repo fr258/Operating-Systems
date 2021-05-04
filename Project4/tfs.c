@@ -532,7 +532,7 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 
 	// Step 1: call get_node_by_path() to get inode from path
 	// must right error code on fail - returns "no such file or directory found"
-	struct inode* inode = NULL;
+	struct inode* inode = malloc(sizeof(struct inode));
 	if(get_node_by_path(path, 0, inode) == -1){
 		printf("File at path DNE\n");
 		free(inode);
@@ -562,7 +562,7 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 
 	// Step 1: Call get_node_by_path() to get inode from path
-	struct inode *inode = NULL;
+	struct inode *inode = malloc(sizeof(struct inode));
 	// Sets to 1 on success, -1 on failure
 	int ret = get_node_by_path(path, 0, inode);
 
@@ -574,7 +574,7 @@ static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
 
 	// Step 1: Call get_node_by_path() to get inode from path
-	struct inode *inode = NULL;
+	struct inode *inode = malloc(sizeof(struct inode));
     int ret = get_node_by_path(path, 0, inode);
 	// Fail if path doesn't exist
 	if(ret == -1){
@@ -638,7 +638,7 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 	bname = basename(bcopy);
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
-	struct inode *inode = NULL;
+	struct inode *inode = malloc(sizeof(struct inode));
 	int get_node_ret = get_node_by_path(dname, 0, inode);
 
 	// Check if directory inode was returned or if it is a file
@@ -711,16 +711,23 @@ static int tfs_rmdir(const char *path) {
 	// Step 5: Call get_node_by_path() to get inode of parent directory
 	// Step 6: Call dir_remove() to remove directory entry of target directory in its parent directory
 	//int is_empty = 1;
-	struct inode inode;
-	get_node_by_path(path, 0, &inode);
+	struct inode *inode = malloc(sizeof(struct inode));
+	int ret = get_node_by_path(path, 0, inode);
+	// Check if directory exists
+	if(ret == -1){
+		printf("dir DNE\n");
+		free(inode);
+		return 1;
+	}
 	for(int i = 0; i < 16; i++) {
-		if(inode.direct_ptr[i] != 0) {
+		if(inode->direct_ptr[i] != 0) {
 			printf("%s %s%s\n","rm: cannot remove ", basename((char*)path),": Is a directory");
+			free(inode);
 			return 1;
 		}
 	}
 	unlink(path);
-
+	free(inode);
 	return 0;
 }
 
@@ -734,12 +741,13 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	bname = basename(bcopy);
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
-	struct inode *inode = NULL;
+	struct inode *inode = malloc(sizeof(struct inode));
 	int get_node_ret = get_node_by_path(dname, 0, inode);
 
 	// Check if directory inode was returned
 	if(get_node_ret < 0 || inode == NULL || inode->type == 0){
 		printf("parent dir doesn't exist\n");
+		free(inode);
 		return -1;
 	}
 
@@ -766,6 +774,7 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 			// Check if bname already exists in dname's directory
 			if(strcmp(dtemp->name, path) == 0){
 				printf("name already exists\n");
+				free(inode);
 				return -1;
 			}
 		}
@@ -778,6 +787,7 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	int dir_add_ret = dir_add(*inode, get_avail_ret, bname, strlen(bname));
 	if(dir_add_ret < 0){
 		printf("couldn't add dir\n");
+		free(inode);
 		return -1;
 	}
 	// Step 5: Update inode for target file
@@ -786,6 +796,7 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
 	// Step 6: Call writei() to write inode to disk
 	writei(get_avail_ret, inode);
+	free(inode);
 
 	return 0;
 }
@@ -794,19 +805,30 @@ static int tfs_open(const char *path, struct fuse_file_info *fi) {
 //int get_node_by_path(const char *path, uint16_t ino, struct inode *inode)
 	// Step 1: Call get_node_by_path() to get inode from path
 	// Step 2: If not find, return -1
-	struct inode inode;
-	if(get_node_by_path(path, 0, &inode) != 0) return -1;
-	if(inode.valid == 0) return -1;
+	struct inode *inode = malloc(sizeof(struct inode));
+	int ret = 0;
+	if(get_node_by_path(path, 0, &inode) != 0){
+		ret = -1;
+	}
+	if(inode.valid == 0){
+		ret = -1;
+	}
 
-	return 0;
+	free(inode);
+	return ret;
 }
 
 static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
 
 	// Step 1: You could call get_node_by_path() to get inode from path
 	if(tfs_open(path, fi) == 0) {
-		struct inode inode;
-		get_node_by_path(path, 0, &inode);
+		struct inode *inode = malloc(sizeof(struct inode));
+		int ret = get_node_by_path(path, 0, inode);
+		if(ret == -1){
+			printf("file DNE in read.\n");
+			free(inode);
+			return 0;
+		}
 		int start_block = offset/BLOCK_SIZE;
 		int end_block = (offset+size)/BLOCK_SIZE;
 	
@@ -815,7 +837,7 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 		if(size > 0) {
 			 //first data block
 			char *block_temp = malloc(BLOCK_SIZE);
-			bio_read(inode.direct_ptr[0], block_temp);
+			bio_read(inode->direct_ptr[0], block_temp);
 			int copy_size, first_block_size;
 			if(size > (BLOCK_SIZE - offset)) first_block_size = BLOCK_SIZE - offset;
 			else first_block_size = size; //less than one block 
@@ -823,13 +845,13 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 			
 			//middle data blocks
 			for(int i = start_block + 1, j = 0; i < end_block; i++, j++) {
-				bio_read(inode.direct_ptr[i], block_temp);
+				bio_read(inode->direct_ptr[i], block_temp);
 				memcpy(buffer + first_block_size + j*BLOCK_SIZE, block_temp, BLOCK_SIZE);
 			}	
 
 			if(start_block != end_block) {
 				//final data block
-				bio_read(inode.direct_ptr[0], block_temp);
+				bio_read(inode->direct_ptr[0], block_temp);
 				copy_size = (size - (BLOCK_SIZE - offset%BLOCK_SIZE))%BLOCK_SIZE;
 				memcpy(buffer + first_block_size + (end_block-start_block)*BLOCK_SIZE, block_temp, copy_size);
 			}
@@ -853,8 +875,13 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 
 	// Step 1: You could call get_node_by_path() to get inode from path
 	if(tfs_open(path, fi) == 0) {
-		struct inode inode;
-		get_node_by_path(path, 0, &inode);
+		struct inode *inode;
+		int ret = get_node_by_path(path, 0, inode);
+		if(ret == -1){
+			printf("file DNE in write.\n");
+			free(inode);
+			return -1;
+		}
 		int start_block = offset/BLOCK_SIZE;
 		int end_block = (offset+size)/BLOCK_SIZE;
 		
@@ -862,13 +889,13 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 		
 		int to_allocate = start_block;
 		for(int i = start_block; i <= end_block; i++, to_allocate++) {
-			if(inode.direct_ptr[i] == 0) 
+			if(inode->direct_ptr[i] == 0) 
 				break;
 		}
 		
 		//must allocate more blocks for file
 		while(to_allocate <= end_block) {
-			inode.direct_ptr[to_allocate] = get_avail_blkno();
+			inode->direct_ptr[to_allocate] = get_avail_blkno();
 			to_allocate++;
 		}	
 		
@@ -877,7 +904,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 		if(size > 0) {
 			 //first data block
 			char *block_temp = malloc(BLOCK_SIZE);
-			bio_read(inode.direct_ptr[0], block_temp);
+			bio_read(inode->direct_ptr[0], block_temp);
 			int copy_size, first_block_size;
 			if(size > (BLOCK_SIZE - offset)) first_block_size = BLOCK_SIZE - offset;
 			else first_block_size = size; //less than one block 
@@ -886,14 +913,14 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 			
 			//middle data blocks
 			for(int i = start_block + 1, j = 0; i < end_block; i++, j++) {
-				bio_read(inode.direct_ptr[i], block_temp);
+				bio_read(inode->direct_ptr[i], block_temp);
 				memcpy(block_temp, buffer + first_block_size + j*BLOCK_SIZE, BLOCK_SIZE);
 				bio_write(i, block_temp);
 			}	
 
 			if(start_block != end_block) {
 				//final data block
-				bio_read(inode.direct_ptr[0], block_temp);
+				bio_read(inode->direct_ptr[0], block_temp);
 				copy_size = (size - (BLOCK_SIZE - offset%BLOCK_SIZE))%BLOCK_SIZE;
 				memcpy(block_temp, buffer + first_block_size + (end_block-start_block-1)*BLOCK_SIZE, copy_size);
 				bio_write(end_block, block_temp);
@@ -915,25 +942,39 @@ static int tfs_unlink(const char *path) {
 	base_name = basename(bcopy);
 
 	// Step 2: Call get_node_by_path() to get inode of target file
-	struct inode inode;
-	get_node_by_path(path, 0, &inode);
+	struct inode *inode = malloc(sizeof(struct inode));
+	int ret = get_node_by_path(path, 0, inode);
+	if(ret == -1){
+		printf("file DNE in unlink\n");
+		free(inode);
+		return -1;
+	}
+
 	// Step 3: Clear data block bitmap of target file
 	for(int i = 0; i < 16; i++) { //go through direct pointers
-		if(inode.direct_ptr[i] != 0)
-			unset_bitmap(dMap, inode.direct_ptr[i]);
+		if(inode->direct_ptr[i] != 0)
+			unset_bitmap(dMap, inode->direct_ptr[i]);
 	}
 	// Step 4: Clear inode bitmap and its data block
-	unset_bitmap(iMap, inode.ino); 
+	unset_bitmap(iMap, inode->ino); 
 	struct inode inval_inode;
 	inval_inode.valid = 0;
-	writei(inode.ino, &inval_inode);
+	writei(inode->ino, &inval_inode);
 
 	// Step 5: Call get_node_by_path() to get inode of parent directory
-	get_node_by_path(dir_name, 0, &inode);
-
+	struct inode *inodeParent = malloc(sizeof(struct inode));
+	ret = get_node_by_path(dir_name, 0, inodeParent);
+	if(ret == -1){
+		printf("parent dir DNE in unlink\n");
+		free(inode);
+		free(inodeParent);
+		return -1;
+	}
 	// Step 6: Call dir_remove() to remove directory entry of target file in its parent directory
-	dir_remove(inode, base_name, strlen(base_name));
+	dir_remove(inodeParent, base_name, strlen(base_name));
 
+	free(inode);
+	free(inodeParent);
 	return 0;
 }
 
