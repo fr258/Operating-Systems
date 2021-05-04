@@ -99,12 +99,12 @@ int get_avail_blkno() {
  */
 // Returns -1 upon not finding the ino number
 // Returns 1 upon finding the corresponding inode and sets the inode pointer
-// *inode points to heap memory - must be freed by caller
+// *inode points to heap memory - must be malloced by caller
 int readi(uint16_t ino, struct inode *inode) {
 
 	int i, j, readRet = 0, inodeSize = sizeof(struct inode);
-	void *readBuf = malloc(BLOCK_SIZE);
-	struct inode *tempInode;
+	struct inode *readBuf = malloc(BLOCK_SIZE);
+	struct inode *tempInode = malloc(inodeSize);
 
   	// Step 1: Get the inode's on-disk block number
 	// Iterate thru all inode blocks
@@ -112,28 +112,28 @@ int readi(uint16_t ino, struct inode *inode) {
 	for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
 		// Read contents of block i - cast for easier manipulation
 		readRet = bio_read(i, readBuf);
-		readBuf = (char*)readBuf;
 
 		// On successful read, go thru all inodes in single block (max of 16)
 		if(readRet > 0){
 			// Step 2: Get offset of the inode in the inode on-disk block
 			for(j = 0; j < BLOCK_SIZE / inodeSize; j++){
-				// Extract jth inode in readBuf and cast to struct inode
-				memcpy(tempInode, readBuf + (j * inodeSize), inodeSize);
-				tempInode = (struct inode*)tempInode;
+				// Extract jth inode in readBuf
+				memcpy(tempInode, readBuf + j, inodeSize);
 
 				// Step 3: Read the block from disk and then copy into inode structure
 				// Compare ith inode's number to desired number
 				if(tempInode->ino == ino){
-					inode = tempInode;
+					memcpy(inode, tempInode, inodeSize);
+					free(tempInode);
 					free(readBuf);
 					return 1;
 				}
 			}
 		}
 	}
+	free(tempInode);
 	free(readBuf);
-	return -1;
+	return 0;
 }
 
 // Returns -1 upon not finding the ino number
@@ -340,29 +340,49 @@ int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 // Assumes it is always given the total root directory's inode number, 0
 // Sets *inode to point to <file>'s inode, which is stored in heap memory
 	// and must be freed by the caller
+	// inode is assumed to be malloced by the caller
 // Returns -1 upon early termination, unable to find nextName in current directory
 int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// Get next name in path
 	// Extract <next> from <next>/<nextNext>/<nextNextNext>/...
-	char nextName[208], nextPath[208];
-	int i, j;
+		char nextName[208], nextPath[208];
+	int i = 0, nameIndex = 0, nextIndex = 0;
+
 	// Copy chars into nextName until next delimiter or end of path
-	for(i = 0; i < 208 && path[i] != '\0' && path[i] != '/'; i++){
-		nextName[i] = path[i];
+	if(path[0] == '/'){
+		i++;
+	}
+	for(nameIndex = 0; i < 208 && path[i] != '\0' && path[i] != '/'; i++, nameIndex++){
+		nextName[nameIndex] = path[i];
 	}
 	// End string with null terminator
-	nextName[i] = '\0';
+	nextName[nameIndex] = '\0';
 
-	// Extract <nextNext>/<nextNextNext>/... from <next>/<nextNext>/<nextNextNext>/...
-	for(j = i; j < 208 && path[j] != '\0'; j++){
-		nextPath[j-i] = path[j];
+	// Extract <nextNext>/<nextNextNext>/... from /<next>/<nextNext>/<nextNextNext>/...
+	if(path[i] == '/'){
+		i++;
 	}
-	
-
-	// Make sure path is not an empty string
+	for(nextIndex = 0; i < 208 && path[i] != '\0'; i++, nextIndex++){
+		nextPath[nextIndex] = path[i];
+	}
+	// End string with null terminator
+	nextPath[nextIndex] = '\0';
+	// printf("in getnodebypath.\n");
+	// printf("path: %s.\n", path);
+	// printf("nextname: %s.\n", nextName);
+	// printf("nextpath: %s.\n", nextPath);
+	// Make sure path is not an empty string, should never happen
 	if(i == 0){
+		//printf("path is empty.\n");
 		inode = NULL;
 		return -1;
+	}
+
+	// Case where only "/" is sent in as path - should just return root directory's inode
+	if(i == 1){
+		// printf("only /\n");
+		// return 1;
+		return readi(0, inode);
 	}
 
 	// Find currPath's dir inside given ino's dir
@@ -371,6 +391,7 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 
 	// Couldn't find subdirectory/subfile name within directory number ino
 	if(ret == 0 || nextDirent == NULL || nextDirent ->valid < 0){
+		printf("couldn't find.\n");
 		inode = NULL;
 		return -1;
 	}
@@ -379,16 +400,22 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// Not the best since a path of "test/good/bad/test/good" would return (directory) good's inode
 	// Later: maybe it wouldn't since the path still has "/bad/test/good" appended to good
 	if(strcmp(basename((char*)path), nextName) == 0){
+		printf("found match\n");
 		int dirInodeNumber = nextDirent->ino;
 		free(nextDirent);
 		// readi returns -1 on fail, 1 on success
 		return readi(dirInodeNumber, inode);
 	}
+
+	// Case where nextPath is empty - reached end of path
+	if(nextIndex == 0){
+		printf("end of path.\n");
+		return -1;
+	}
+
 	// Recurse on next segment of the path
 	return get_node_by_path(nextPath, nextDirent->ino, inode);
 }
-
-
 
 
 /* 
@@ -941,14 +968,14 @@ static struct fuse_operations tfs_ope = {
 	.release	= tfs_release
 };
 
-
 int main(int argc, char *argv[]) {
-	int fuse_stat;
+	
+	// int fuse_stat;
 
-	getcwd(diskfile_path, PATH_MAX);
-	strcat(diskfile_path, "/DISKFILE");
+	// getcwd(diskfile_path, PATH_MAX);
+	// strcat(diskfile_path, "/DISKFILE");
 
-	fuse_stat = fuse_main(argc, argv, &tfs_ope, NULL);
+	// fuse_stat = fuse_main(argc, argv, &tfs_ope, NULL);
 
-	return fuse_stat;
+	// return fuse_stat;
 }
