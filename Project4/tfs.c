@@ -244,7 +244,7 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 	
 	//entries of directory minus self and parent
 	int child_count = inode->link;
-	printf("child_count is %d\n", child_count);
+	//printf("child_count is %d\n", child_count);
 	//number of valid entries iterated through at present
 	int curr_child_count = 0;
 	int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
@@ -256,16 +256,16 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 	//for each of directory's direct pointers
 	for(int i = 0; (i < 16) && (curr_child_count < child_count); i++) {
 		if(inode->direct_ptr[i] != -1) {
-			printf("valid direct pointer found pointing to block %d\n", inode->direct_ptr[i]);
+			//printf("valid direct pointer found pointing to block %d\n", inode->direct_ptr[i]);
 			bio_read(inode->direct_ptr[i], dirents);
 			for(int i = 0; (i < dirents_per_block) && (curr_child_count < child_count); i++) {
 				//if dirent valid
 				if(dirents[i].valid) {
-					printf("valid dir \"%s\" at index %d\n", dirents[i].name, i);
+					//printf("valid dir \"%s\" at index %d\n", dirents[i].name, i);
 					if(strncmp(fname, dirents[i].name, name_len) == 0) {
 						
 						memcpy(dirent, &dirents[i], sizeof(struct dirent));
-						printf("end find_dir, found\n");
+						//printf("end find_dir, found\n");
 						return 1;
 					}
 					curr_child_count++;
@@ -366,7 +366,7 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 				int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
 				//for each dirent in block
 				for(int b = 0; b < dirents_per_block; b++) {
-					printf("b is %d\n", b);
+					//printf("b is %d\n", b);
 					//if unused dirent found
 					if(!dirents[b].valid) {
 						dirent_block_num = dir_inode.direct_ptr[i];
@@ -490,8 +490,8 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 		dirent.ino = f_ino;
 		strncpy(dirent.name, fname, name_len+1);
 		dirent.len = name_len;		
-		printf("dir_add, name is %s with length %d\n", dirent.name, dirent.len);
-		printf("passed in: dir_add, fname is %s with name_len %d\n", fname, name_len);
+		//printf("dir_add, name is %s with length %d\n", dirent.name, dirent.len);
+		//printf("passed in: dir_add, fname is %s with name_len %d\n", fname, name_len);
 		
 		memcpy(buffer+dirent_index, &dirent, sizeof(struct dirent)); //write dirent to block of dirents
 		bio_write(dirent_block_num, buffer); //write block of dirents
@@ -942,7 +942,7 @@ int tfs_mkfs() {
 	//buffer[1] = temp_dirent;
 	memcpy(buffer+1, &temp_dirent, sizeof(struct dirent));
 	
-	printf("buffer[0] is %s, valid is %d, buffer[1] is %s, valid is %d\n", buffer[0].name, buffer[0].valid, buffer[1].name, buffer[1].valid);
+	//printf("buffer[0] is %s, valid is %d, buffer[1] is %s, valid is %d\n", buffer[0].name, buffer[0].valid, buffer[1].name, buffer[1].valid);
 	bio_write(temp_node.direct_ptr[0], buffer);
 //	struct dirent *tempBuffer = malloc(BLOCK_SIZE);
 	//bio_read(temp_node.direct_ptr[0], tempBuffer);
@@ -1036,7 +1036,7 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 	}
 	else {
 		printf("not creating new file, ret is %d\n", ret);
-		printf("inode is %d\n", inode->ino);
+		//printf("inode is %d\n", inode->ino);
 	}
 
 	// Step 2: fill attribute of file into stbuf from inode
@@ -1248,8 +1248,8 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
 	struct inode *inode = malloc(sizeof(struct inode));
 	int get_node_ret = get_node_by_path(dname, 0, inode);
-	printf("get_node_ret %d\n", get_node_ret);
-	printf("inode->type %d\n", inode->type);
+	//printf("get_node_ret %d\n", get_node_ret);
+	//printf("inode->type %d\n", inode->type);
 	// Check if directory inode was returned
 	if(get_node_ret < 0 || inode == NULL || inode->type == 0){
 		printf("parent dir doesn't exist\n");
@@ -1275,6 +1275,13 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	inode->ino = get_avail_ret;
 	inode->type = 0;
 	inode->size = 0;
+	for(int i = 0; i < 16; i++) { /* direct pointer to data block */
+		inode->direct_ptr[i] = -1;
+	}	
+	for(int i = 0; i < 8; i++) { /* indirect pointer to data block */
+		inode->indirect_ptr[i] = -1;
+	}	
+	
 
 	// Step 6: Call writei() to write inode to disk
 	writei(get_avail_ret, inode);
@@ -1396,7 +1403,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 
 	// Step 4: Update the inode info and write it to disk
 
-	printf("in tfs_write\n");
+	//printf("in tfs_write, attempting to write %u bytes to offset %u path %s\n", size, offset, path);
 	int block_num = 0;
 	if(size < 0) {
 		printf("must write in positive number of bytes\n");
@@ -1405,8 +1412,10 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 	if(tfs_open(path, fi) == 0) {
 		struct inode *inode = malloc(sizeof(struct inode));
 		get_node_by_path(path, 0, inode);
+		printf("in tfs_write, attempting to write %u bytes to offset %u to inode %d\n", size, offset, inode->ino);
 		int start_block = offset/BLOCK_SIZE;
 		int end_block = (offset+size)/BLOCK_SIZE;
+		printf("start_block: %d end_block: %d\n", start_block, end_block);
 		
 		//16 direct, 8 indirect pointers
 		if(end_block > (16 + 8*(BLOCK_SIZE/sizeof(int)))) return 0; //requesting too much space or offset is too large
@@ -1416,6 +1425,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 		int first_block_size = 0;
 		char *block_temp = malloc(BLOCK_SIZE);
 		for(int i = 0; (i < 16) && (block_num <= end_block); i++) {
+			//printf("block %d\n", i);
 			//if within blocks to write to
 			if((block_num >= start_block) && (block_num <= end_block)) {
 				if(inode->direct_ptr[i] == -1) {
@@ -1423,6 +1433,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 					if(temp > 0) {
 						inode->direct_ptr[i] = temp;
 						inode->size += BLOCK_SIZE;
+						printf("\ninode->size is %d\n\n", inode->size);
 					}
 					else {
 						printf("write failed-- not enough space\n");
@@ -1430,18 +1441,22 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 						return 0;
 					}
 				}
+				else {
+					printf("inode->direct_ptr[%d] is %d\n", i, inode->direct_ptr[i]);
+				}
 				bio_read(inode->direct_ptr[i], block_temp);
 				if(block_num == start_block) {								
 					if(size > (BLOCK_SIZE - offset%BLOCK_SIZE)) 
 						first_block_size = BLOCK_SIZE - offset%BLOCK_SIZE;
 					else 
 						first_block_size = size; //less than one block 
-					
+					printf("first_block_size is %d\n", first_block_size);
 					memcpy(block_temp + offset%BLOCK_SIZE, buffer, first_block_size);
 				}
 				else if(block_num == end_block) {
 					int end_block_size = (offset+size)%BLOCK_SIZE;
-					memcpy(block_temp, buffer + first_block_size + (end_block - start_block-1)*BLOCK_SIZE, end_block_size);				
+					memcpy(block_temp, buffer + first_block_size + (end_block - start_block-1)*BLOCK_SIZE, end_block_size);		
+					printf("end_block_size is %d\n", end_block_size);					
 				}
 				//intermediate block
 				else {
@@ -1518,6 +1533,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 		}
 
 		// Note: this function should return the amount of bytes you write to disk
+		writei(inode->ino, inode); 
 		return size;
 	}
 	printf("file not found\n");
