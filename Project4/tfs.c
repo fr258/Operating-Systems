@@ -105,6 +105,7 @@ int readi(uint16_t ino, struct inode *inode) {
       // Step 1: Get the inode's on-disk block number
     // Iterate thru all inode blocks
     // Assumes inode blocks are stored before data blocks
+	printf("from %d to %d\n", superblock.i_start_blk, superblock.d_start_blk);
     for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
         // Read contents of block i - cast for easier manipulation
         readRet = bio_read(i, readBuf);
@@ -136,16 +137,17 @@ int writei(uint16_t ino, struct inode *inode) {
     int i, j, readRet = 0, inodeSize = sizeof(struct inode);
     struct inode *readBuf = malloc(BLOCK_SIZE);
     struct inode *tempInode = malloc(inodeSize);
-
+	int currInode = 0;
       // Step 1: Get the inode's on-disk block number
     // Iterate thru all inode blocks
     // Assumes inode blocks are stored before data blocks
+			printf("from %d to %d\n", superblock.i_start_blk, superblock.d_start_blk);
     for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
         // Read contents of block i - cast for easier manipulation
         readRet = bio_read(i, readBuf);
 
         // On successful read, go thru all inodes in single block (max of 16)
-        if(readRet > 0){
+        if(readRet >= 0){
             // Step 2: Get offset of the inode in the inode on-disk block
             for(j = 0; j < BLOCK_SIZE / inodeSize; j++){
                 // Extract jth inode in readBuf
@@ -153,13 +155,14 @@ int writei(uint16_t ino, struct inode *inode) {
 
                 // Step 3: Read the block from disk and then copy into inode structure
                 // Compare ith inode's number to desired number
-                if(tempInode->ino == ino){
+                if(currInode == ino){
                     memcpy(readBuf + j, inode, inodeSize);
 					bio_write(i, readBuf);
                     free(tempInode);
                     free(readBuf);
                     return 1;
                 }
+				currInode++;
             }
         }
     }
@@ -264,7 +267,7 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 					//printf("valid dir \"%s\" at index %d\n", dirents[i].name, i);
 					if(strncmp(fname, dirents[i].name, name_len) == 0) {
 						
-						memcpy(dirent, &dirents[i], sizeof(struct dirent));
+						memcpy(dirent, dirents+i, sizeof(struct dirent));
 						//printf("end find_dir, found\n");
 						return 1;
 					}
@@ -858,11 +861,14 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// Not the best since a path of "test/good/bad/test/good" would return (directory) good's inode
 	// Later: maybe it wouldn't since the path still has "/bad/test/good" appended to good
 	if(strcmp(basename((char*)path), nextName) == 0){
-		printf("found match\n");
+		printf("found match: inode %d\n", nextDirent->ino);
 		int dirInodeNumber = nextDirent->ino;
 		free(nextDirent);
 		// readi returns -1 on fail, 1 on success
-		return readi(dirInodeNumber, inode);
+		int ret_val = readi(dirInodeNumber, inode);
+		printf("read in: %d, ret_val is %d\n", inode->ino, ret_val);
+		return ret_val;
+		
 	}
 
 	// Case where nextPath is empty - reached end of path
@@ -1285,6 +1291,12 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
 	// Step 6: Call writei() to write inode to disk
 	writei(get_avail_ret, inode);
+	printf("tfs_create: created file at inode %d\n", get_avail_ret);
+	struct inode *tempnode = malloc(sizeof(struct inode));
+	if(readi(get_avail_ret, tempnode) == 0)
+		printf("failed to read in\n");
+	else 
+		printf("tfs_create: in memory, inode num is %d\n", tempnode->ino);
 	
 	return 0;
 }
@@ -1295,7 +1307,7 @@ static int tfs_open(const char *path, struct fuse_file_info *fi) {
 	// Step 1: Call get_node_by_path() to get inode from path
 	// Step 2: If not find, return -1
 	struct inode inode;
-	if(get_node_by_path(path, 0, &inode) != 0) return -1;
+	if(get_node_by_path(path, 0, &inode) != 1) return -1;
 	if(inode.valid == 0) return -1;
 
 
@@ -1415,7 +1427,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 		printf("in tfs_write, attempting to write %u bytes to offset %u to inode %d\n", size, offset, inode->ino);
 		int start_block = offset/BLOCK_SIZE;
 		int end_block = (offset+size)/BLOCK_SIZE;
-		printf("start_block: %d end_block: %d\n", start_block, end_block);
+		//printf("start_block: %d end_block: %d\n", start_block, end_block);
 		
 		//16 direct, 8 indirect pointers
 		if(end_block > (16 + 8*(BLOCK_SIZE/sizeof(int)))) return 0; //requesting too much space or offset is too large
@@ -1423,6 +1435,9 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 		// Step 2: Based on size and offset, read its data blocks from disk
 		// Step 3: copy the correct amount of data from offset to buffer
 		int first_block_size = 0;
+		int end_block_size = (offset+size)%BLOCK_SIZE;
+		if(end_block_size == 0) end_block--;
+							
 		char *block_temp = malloc(BLOCK_SIZE);
 		for(int i = 0; (i < 16) && (block_num <= end_block); i++) {
 			//printf("block %d\n", i);
@@ -1433,7 +1448,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 					if(temp > 0) {
 						inode->direct_ptr[i] = temp;
 						inode->size += BLOCK_SIZE;
-						printf("\ninode->size is %d\n\n", inode->size);
+						
 					}
 					else {
 						printf("write failed-- not enough space\n");
@@ -1450,13 +1465,12 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 						first_block_size = BLOCK_SIZE - offset%BLOCK_SIZE;
 					else 
 						first_block_size = size; //less than one block 
-					printf("first_block_size is %d\n", first_block_size);
+					//printf("first_block_size is %d\n", first_block_size);
 					memcpy(block_temp + offset%BLOCK_SIZE, buffer, first_block_size);
 				}
 				else if(block_num == end_block) {
-					int end_block_size = (offset+size)%BLOCK_SIZE;
 					memcpy(block_temp, buffer + first_block_size + (end_block - start_block-1)*BLOCK_SIZE, end_block_size);		
-					printf("end_block_size is %d\n", end_block_size);					
+					//printf("end_block_size is %d\n", end_block_size);					
 				}
 				//intermediate block
 				else {
@@ -1534,6 +1548,7 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 
 		// Note: this function should return the amount of bytes you write to disk
 		writei(inode->ino, inode); 
+		printf("\ninode->size is %d\n\n", inode->size);
 		return size;
 	}
 	printf("file not found\n");
