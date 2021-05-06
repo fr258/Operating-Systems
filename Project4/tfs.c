@@ -378,10 +378,10 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 						break;
 					}
 				}
-				if(!found) {
-					printf("Not enough space in directory-- failed operation.\n");
-					return -1;
-				}
+				// if(!found) {
+				// 	printf("Not enough space in directory-- failed operation.\n");
+				// 	return -1;
+				// }
 			}
 			//store unused direct pointer-- might be needed later
 			else {
@@ -1072,9 +1072,12 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 	printf("in tfs_opendir\n");
 	// Step 1: Call get_node_by_path() to get inode from path
-	struct inode *inode = NULL;
+	struct inode *inode = malloc(sizeof(struct inode));
 	// Step 2: If not find, return -1
-    return get_node_by_path(path, 0, inode);
+	if(get_node_by_path(path, 0, inode) == 1){
+		return 0;
+	}
+	return -1;
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
@@ -1084,14 +1087,14 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
     int ret = get_node_by_path(path, 0, inode);
 	// Fail if path doesn't exist
 	if(ret == -1){
-		return ENOENT;
+		return -ENOENT;
 	}
 	// Step 2: Read directory entries from its data blocks, and copy them to filler
 
 	// If inode pointed to by path is a file, break
 	if(inode->type == 0){
 		printf("Input a file when expected directory.\n");
-		return ENOENT;
+		return -ENOENT;
 	}
 
 	// Continue as normal if given a directory
@@ -1162,7 +1165,7 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 	bname = basename(bcopy);
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
-	struct inode *inode = NULL;
+	struct inode *inode = malloc(sizeof(struct inode));
 	int get_node_ret = get_node_by_path(dname, 0, inode);
 
 	// Check if directory inode was returned
