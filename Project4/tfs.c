@@ -859,7 +859,9 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// Base case: after extracting currPath's inode, check if basename(path) == nextName
 	// Not the best since a path of "test/good/bad/test/good" would return (directory) good's inode
 	// Later: maybe it wouldn't since the path still has "/bad/test/good" appended to good
-	if(strcmp(basename((char*)path), nextName) == 0){
+	if(path[0] == '/') path = path + 1;
+	printf("comparing %s and %s\n", nextName, path);
+	if(strcmp(nextName, path) == 0){
 		printf("found match: inode %d\n", nextDirent->ino);
 		int dirInodeNumber = nextDirent->ino;
 		free(nextDirent);
@@ -867,7 +869,6 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 		int ret_val = readi(dirInodeNumber, inode);
 		printf("read in: %d, ret_val is %d\n", inode->ino, ret_val);
 		return ret_val;
-		
 	}
 
 	// Case where nextPath is empty - reached end of path
@@ -1638,6 +1639,86 @@ static struct fuse_operations tfs_ope = {
 	.release	= tfs_release
 };
 
+int get_node_by_pathtest(const char *path, uint16_t ino, struct inode *inode) {
+	// Get next name in path
+	// Extract <next> from <next>/<nextNext>/<nextNextNext>/...
+	printf("in get_node-by_path, will attempt to parse \"%s\"\n", path);
+	char nextName[208], nextPath[208];
+	int i = 0, nameIndex = 0, nextIndex = 0;
+
+	// Copy chars into nextName until next delimiter or end of path
+	if(path[0] == '/'){
+		i++;
+	}
+	for(nameIndex = 0; i < 208 && path[i] != '\0' && path[i] != '/'; i++, nameIndex++){
+		nextName[nameIndex] = path[i];
+	}
+	// End string with null terminator
+	nextName[nameIndex] = '\0';
+
+	// Extract <nextNext>/<nextNextNext>/... from /<next>/<nextNext>/<nextNextNext>/...
+	if(path[i] == '/'){
+		i++;
+	}
+	for(nextIndex = 0; i < 208 && path[i] != '\0'; i++, nextIndex++){
+		nextPath[nextIndex] = path[i];
+	}
+	// End string with null terminator
+	nextPath[nextIndex] = '\0';
+	// printf("in getnodebypath.\n");
+	// printf("path: %s.\n", path);
+	printf("nextname: \"%s\"\n", nextName);
+	printf("nextpath: \"%s\"\n", nextPath);
+	// Make sure path is not an empty string, should never happen
+	if(i == 0){
+		//printf("path is empty.\n");
+		inode = NULL;
+		printf("couldn't find.\n");
+		return -1;
+	}
+
+	// Case where only "/" is sent in as path - should just return root directory's inode
+	if(i == 1){
+		// printf("only /\n");
+		// return 1;
+		printf("root node\n");
+		return readi(0, inode);
+	}
+
+	// Find currPath's dir inside given ino's dir
+	// struct dirent *nextDirent = malloc(sizeof(struct dirent));
+	// int ret = dir_find(ino, nextName, i, nextDirent);
+
+	// // Couldn't find subdirectory/subfile name within directory number ino
+	// if(ret == -1 || nextDirent == NULL || nextDirent ->valid < 0){
+	// 	printf("couldn't find.\n");
+	// 	inode = NULL;
+	// 	return -1;
+	// }
+	
+	// // Base case: after extracting currPath's inode, check if basename(path) == nextName
+	// // Not the best since a path of "test/good/bad/test/good" would return (directory) good's inode
+	// // Later: maybe it wouldn't since the path still has "/bad/test/good" appended to good
+	// if(strcmp(basename((char*)path), nextName) == 0){
+	// 	printf("found match: inode %d\n", nextDirent->ino);
+	// 	int dirInodeNumber = nextDirent->ino;
+	// 	free(nextDirent);
+	// 	// readi returns -1 on fail, 1 on success
+	// 	int ret_val = readi(dirInodeNumber, inode);
+	// 	printf("read in: %d, ret_val is %d\n", inode->ino, ret_val);
+	// 	return ret_val;
+	// }
+
+	// Case where nextPath is empty - reached end of path
+	if(nextIndex == 0){
+		printf("end of path.\n");
+		return -1;
+	}
+
+	// Recurse on next segment of the path
+	return get_node_by_pathtest(nextPath, 0, inode);
+}
+
 int main(int argc, char *argv[]) {
 	int fuse_stat;
 
@@ -1645,6 +1726,9 @@ int main(int argc, char *argv[]) {
 	strcat(diskfile_path, "/DISKFILE");
 
 	fuse_stat = fuse_main(argc, argv, &tfs_ope, NULL);
-
+	
 	return fuse_stat;
+	// struct inode* inode = malloc(sizeof(struct inode));
+	// get_node_by_pathtest("../test", 0, inode);
+	// get_node_by_pathtest("../5", 0, inode);
 }
