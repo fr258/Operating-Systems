@@ -141,7 +141,6 @@ int writei(uint16_t ino, struct inode *inode) {
       // Step 1: Get the inode's on-disk block number
     // Iterate thru all inode blocks
     // Assumes inode blocks are stored before data blocks
-			printf("from %d to %d\n", superblock.i_start_blk, superblock.d_start_blk);
     for(i = superblock.i_start_blk; i < superblock.d_start_blk; i++){
         // Read contents of block i - cast for easier manipulation
         readRet = bio_read(i, readBuf);
@@ -1083,7 +1082,8 @@ static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
 	printf("in tfs_readdir\n");
 	// Step 1: Call get_node_by_path() to get inode from path
-	struct inode *inode = NULL;
+	struct inode base_node;
+	struct inode *inode = &base_node;
     int ret = get_node_by_path(path, 0, inode);
 	// Fail if path doesn't exist
 	if(ret == -1){
@@ -1102,7 +1102,7 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 	int currBlockNum;
 	int i, j;
 	struct dirent *readBuf = malloc(BLOCK_SIZE);
-	struct dirent *currDirent;
+	struct dirent *currDirent = malloc(BLOCK_SIZE);
 	int direntSize = sizeof(struct dirent);
 	// Traverse all datablocks of dirents of given inode
 	for(i = 0; i < 16; i++){
