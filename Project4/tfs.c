@@ -691,7 +691,7 @@ int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 	printf("in dir_remove\n");
 	struct inode *inode = &dir_inode;
 	//entries of directory minus self and parent
-	int child_count = inode->link - 2;
+	int child_count = inode->link;
 	//number of valid entries iterated through at present
 	int curr_child_count = 0;
 	int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
