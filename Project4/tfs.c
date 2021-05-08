@@ -40,8 +40,6 @@ struct superblock superblock;
 int get_avail_ino() {
 	printf("in get_avail_ino\n");
 	// Step 1: Read inode bitmap from disk
-	// char inodeBitmap[];
-	// bio_read(superblock.i_bitmap_blk, inodeBitmap);
 
 	// Step 2: Traverse inode bitmap to find an available slot
 	int retVal = -1;
@@ -70,8 +68,6 @@ int get_avail_ino() {
 int get_avail_blkno() {
 	printf("in get_avail_blkno\n");
 	// Step 1: Read data block bitmap from disk
-	// char blockBitmap[];
-	// bio_read(superblock.d_bitmap_blk, blockBitmap);
 
 	// Step 2: Traverse data block bitmap to find an available slot
 	int retVal = -1;
@@ -102,7 +98,7 @@ int readi(uint16_t ino, struct inode *inode) {
     struct inode *readBuf = malloc(BLOCK_SIZE);
     struct inode *tempInode = malloc(inodeSize);
 
-      // Step 1: Get the inode's on-disk block number
+    // Step 1: Get the inode's on-disk block number
     // Iterate thru all inode blocks
     // Assumes inode blocks are stored before data blocks
 	printf("from %d to %d\n", superblock.i_start_blk, superblock.d_start_blk);
@@ -169,68 +165,6 @@ int writei(uint16_t ino, struct inode *inode) {
     free(readBuf);
     return 0;
 }
-
-/* int link_searcher(struct inode *inode, int child_count, int *curr_child_count,
-					int(*direct_helper)(void**, int*), 
-					int(*indirect_helper)(void**, int*), void** helper_input ) {
-	
-	//if no distinct behavior for indirect pointers, use direct pointer logic for both
-	if(indirect_helper == NULL) indirect_helper = direct_helper;
-	
-	//for each of directory's direct pointers
-	for(int i = 0; (i < 16) && (*curr_child_count < child_count); i++) {
-		
-		if(direct_helper(helper_input, inode->direct_ptr + i)) return 1;
-	} 
-	
-	int *pointers = malloc(BLOCK_SIZE);
-	int pointers_per_block = BLOCK_SIZE/sizeof(int);
-	//for each of directory's indirect pointers
-	for(int i = 0; (i < 8) && (*curr_child_count < child_count); i++) {
-		//if indirect pointer in use
-		if(inode->indirect_ptr[i] != 0) {
-			bio_read(inode->indirect_ptr[i], pointers);
-			//go through direct pointers in block 
-			for(int b = 0; (b < pointers_per_block) && (*curr_child_count < child_count); b++) {
-				if(indirect_helper(helper_input, pointers + b)) {
-					//free(pointers);
-					return 1;
-				}
-			}
-		}
-	}
-	//free(pointers);
-	//free(inode);
-	return 0;
-}
-*/
-/* //iterate through dirents in data block to see if any match name of file passed to dir_find
-int dir_find_helper(void **input, int *block_num) {
-	//valid block of dirents
-	if(*block_num != -1) {
-		const char *fname = (const char*)input[0];
-		size_t name_len = *(size_t*)input[1];
-		struct dirent *dirent = (struct dirent*)input[2];
-		int child_count = *(int*)input[3];
-		int *curr_child_count = (int*)input[4];
-		struct dirent *dirents = (struct dirent*)input[5];
-		bio_read(*block_num, dirents);
-		
-		int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
-		//for each dirent in block
-		for(int i = 0; (i < dirents_per_block) && (*curr_child_count < child_count); i++) {
-			//if dirent valid
-			if(dirents[i].valid) {
-				if(strncmp(fname, dirents[i].name, name_len) == 0) {
-					memcpy(dirent, &dirents[i], sizeof(struct dirent));
-					return 1;
-				}
-				(*curr_child_count)++;
-			}
-		}
-	}
-	return 0;
-} */
 
 /* 
  * directory operations
@@ -309,35 +243,6 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 	fflush(stdout);
 	return -1;
 }
-
-/*int dir_add_helper(void **input, int *block_num) {
-		
-	//valid block of dirents
-	if(*block_num != -1) {
-		struct dirent *dirents = (struct dirent*)input[1];
-		bio_read(*block_num, dirents);
-		
-		int *dirent_num = (int*)input[2];
-		int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
-		//for each dirent in block
-		for(int i = 0; (i < dirents_per_block); i++) {
-			//if unused dirent found
-			if(!dirents[i].valid) {
-				//store current block num
-				input[0] = block_num;
-				//store current dirent num
-				*dirent_num = i;
-				return 1;
-			}
-		}
-	}
-	else {
-		//if not valid block found yet, store block pointer to potentially add
-		if(*(int*)(input[0]) == -2) input[0] = block_num;
-	}
-	return 0;
-}*/
-
 
 //reason for duplication: if setting a pointer in the data block of an indirect pointer, must write that data block
 int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t name_len) {
@@ -507,184 +412,6 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 	//}
 	//return -1;
 }
-/*
-int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t name_len) {
-	if(name_len > 208) {
-		printf("Name is too long-- name must be less than 208 characters.\n");
-		return -1;
-	}
-		
-	struct dirent dummyDirent;
-	//entry with given name doesn't already exist inside directory
-	if(dir_find(dir_inode.ino, fname, name_len, &dummyDirent) == 0) {
-		int block_num = -2;
-		struct dirent *dirent_block = malloc(BLOCK_SIZE);
-		int dirent_num = -1;
-		int temp = INT_MIN;
-		void *input[] = {&block_num, dirent_block, &dirent_num};
-		
-		//general buffer to read into 
-		dirent *buffer = malloc(BLOCK_SIZE);
-		
-		//free dirent found in current data blocks (dirent_num has been set)
-		if(link_searcher(&dir_inode, INT_MAX, &temp, dir_add_helper, NULL, input) == 1) {
-			block_num = *(int*)(input[0]);
-		}
-		//no free dirent found in current data blocks-- if space exists, either input[0] was set to block num or there's an unused indirect pointer
-		else {
-			//get free block for new block of dirents
-			int temp =  get_avail_blkno();
-			if(temp == -1) {
-				printf("Not enough space in memory-- failed operation.\n")
-				return -1;
-			}
-			block_num = temp;
-			//either an unused direct pointer or a pointer in an indirect pointer's pointer block was found
-			if(*(int*)(input[0]) != -2) {
-				//input[0] is potentially unused direct pointer, so must set it
-				*(int*)(input[0]) = block_num;
-			}		
-			//either an unused indirect pointer exists or there is no free space
-			else {
-				int found = 0;
-				for(int i = 0; i < 8; i++) {
-					//valid unused indirect pointer
-					if(i != -1) {
-						//map indirect pointer to block of pointers
-						temp =  get_avail_blkno();
-						if(temp == -1) {
-							printf("Not enough space in memory-- failed operation.\n")
-							return -1;
-						}
-						dir_inode.indirect_ptr[i] = temp;
-						//format block to unused int pointers
-						bio_read(dir_inode.indirect_ptr[i], buffer);
-						memset(buffer, -1, BLOCK_SIZE);
-						found = 1;
-						
-						break;					
-					}
-				}
-				if(!found) {
-					printf("Directory is too large-- cannot add further entries.\n");
-					return -1;
-				}
-			}
-			
-			struct dirent *dir_buffer = (struct dirent*)buffer;
-			//read new block to buffer
-			bio_read(block_num, dir_buffer);
-			
-			//format new data block
-			struct dirent invalidDirent;
-			invalidDirent.valid = 0;
-			int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
-			//format full data block with invalid dirents
-			for(int i = 0; i < dirents_per_block; i++) {
-				memcpy(dir_buffer+i, &invalidDirent, sizeof(struct dirent));
-			}
-			
-			//dirent block was just allocated, so new dirent is 0th entry
-			dirent_num = 0;
-		} //end else (no free dirent found in initial search)
-		
-		struct dirent dirent;
-		dirent.ino = f_ino;
-		dirent.valid = 1;
-		strncpy(dirent.name, fname, name_len);
-		dirent.len = name_len;
-		
-		//copy new entry dirent into data block
-		memcpy(buffer+dirent_num, &dirent, sizeof(struct dirent));
-		
-		//write data block to disk
-		bio_write(block_num, buffer);	
-		
-	}
-	return -1;
-}*/
-
-
- /* int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t name_len) {
-	// Step 1: Read dir_inode's data block and check each directory entry of dir_inode
-	
-	// Step 2: Check if fname (directory name) is already used in other entries
-	// Step 3: Add directory entry in dir_inode's data block and write to disk
-	// Allocate a new data block for this directory if it does not exist
-	// Update directory inode
-	// Write directory entry
-	
-	struct dirent dummyDirent;
-	if(dir_find(dir_inode.ino, fname, name_len, &dummyDirent) == 0) { //entry with fname not found
-		int found = 0;
-		int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
-		struct dirent *block = malloc(BLOCK_SIZE);
-		int curr_dirent_in_block = 0;
-		int i;
-		
-		int block_num_local = -1;
-		struct dirent *dirents = malloc(BLOCK_SIZE);
-		int dirent_num = -1;
-		
-		void *input[] = {&block_num_local, dirents, &dirent_num};
-		link_searcher
-		
-		if(!found) { //not enough space in current data blocks
-			if(dir_inode.size >= 16) { //cannot expand further
-				return 0;
-			}
-			//allocate new block
-			else {
-				int empty_ptr_index = -1;
-				for(i = 0; i < 16; i++) {
-					if(dir_inode.direct_ptr[i] == 0)
-						empty_ptr_index = i;
-				}
-				//not enough free pointers
-				if(empty_ptr_index == -1) 
-					return 1;
-				else {
-					dir_inode.direct_ptr[empty_ptr_index] =  get_avail_blkno();
-					struct dirent *temp_block = (struct dirent*)block; //make new block array of dirents
-					bio_read(empty_ptr_index, temp_block); //read newly allocated block in
-					struct dirent temp_dirent;
-					temp_dirent.valid = 0;
-					//format new data block
-					int dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
-					for(int i = 0; i < dirents_per_block; i++) {
-						memcpy(&temp_block[i], &temp_dirent, sizeof(struct dirent)); 
-					}
-				}
-			}
-		}
-		struct dirent dirent;
-		dirent.ino = f_ino;
-		dirent.valid = 1;
-		strncpy(dirent.name, fname, name_len);
-		dirent.len = name_len;
-		
-		memcpy(block+curr_dirent_in_block, &dirent, sizeof(dirent)); //write block in memory
-		bio_write(dir_inode.direct_ptr[i], block); //write block to disk
-		set_bitmap(iMap, f_ino); //set iMap in memory
-		for(int d = superblock.i_bitmap_blk, j = 0; d < superblock.d_bitmap_blk; d++, j++) //write iMap to disk
-			bio_write(d, iMap + j*BLOCK_SIZE);
-		
-		struct inode tempNode;
-		tempNode.ino = 0;			// inode number 
-		tempNode.valid = 1;			// validity of the inode 
-		tempNode.size = 1;			// size of the file 
-		tempNode.type = 1;			// type of the file 
-		tempNode.link = 2;			// link count 
-		for(int c = 0; c < 16; c++) { // direct pointer to data block //
-			tempNode.direct_ptr[c] = -1;
-		}
-		
-		writei(f_ino, &tempNode); //write new inode to disk	
-		writei(dir_inode.ino, &dir_inode); //write directory inode to disk
-	}
-	return 0;
-} */
-
 
 
 int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
@@ -825,10 +552,7 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	}
 	// End string with null terminator
 	nextPath[nextIndex] = '\0';
-	// printf("in getnodebypath.\n");
-	// printf("path: %s.\n", path);
-	// printf("nextname: %s.\n", nextName);
-	// printf("nextpath: %s.\n", nextPath);
+	
 	// Make sure path is not an empty string, should never happen
 	if(i == 0){
 		//printf("path is empty.\n");
@@ -852,13 +576,13 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// Couldn't find subdirectory/subfile name within directory number ino
 	if(ret == -1 || nextDirent == NULL || nextDirent ->valid < 0){
 		printf("couldn't find.\n");
+		printf("ret: %d\n", ret);
+		printf("nextDirent valid: %d\n", nextDirent->valid);
 		inode = NULL;
 		return -1;
 	}
 	
-	// Base case: after extracting currPath's inode, check if basename(path) == nextName
-	// Not the best since a path of "test/good/bad/test/good" would return (directory) good's inode
-	// Later: maybe it wouldn't since the path still has "/bad/test/good" appended to good
+	// Base case: after extracting currPath's inode, check if (/)path == nextName
 	if(path[0] == '/') path = path + 1;
 	printf("comparing %s and %s\n", nextName, path);
 	if(strcmp(nextName, path) == 0){
@@ -899,7 +623,8 @@ int tfs_mkfs() {
 	superblock.d_bitmap_blk = 2;		/* start block of data block bitmap */
 	superblock.i_start_blk =  3;		/* start block of inode region */
 	
-	superblock.d_start_blk =  superblock.i_start_blk + (MAX_INUM*sizeof(struct inode))/BLOCK_SIZE;		/* start block of data block region */
+	/* start block of data block region */
+	superblock.d_start_blk =  superblock.i_start_blk + (MAX_INUM*sizeof(struct inode))/BLOCK_SIZE;		
 	if((MAX_INUM*sizeof(struct inode))%BLOCK_SIZE != 0) superblock.d_start_blk++;
 	
 	// initialize inode bitmap
@@ -948,11 +673,7 @@ int tfs_mkfs() {
 	//buffer[1] = temp_dirent;
 	memcpy(buffer+1, &temp_dirent, sizeof(struct dirent));
 	
-	//printf("buffer[0] is %s, valid is %d, buffer[1] is %s, valid is %d\n", buffer[0].name, buffer[0].valid, buffer[1].name, buffer[1].valid);
 	bio_write(temp_node.direct_ptr[0], buffer);
-//	struct dirent *tempBuffer = malloc(BLOCK_SIZE);
-	//bio_read(temp_node.direct_ptr[0], tempBuffer);
-	//printf("tempBuffer[0] is %s, valid is %d, tempBuffer[1] is %s, valid is %d\n", tempBuffer[0].name, tempBuffer[0].valid, tempBuffer[1].name, tempBuffer[1].valid);
 	
 	for(int i = 1; i < 16; i++) { /* direct pointer to data block */
 		temp_node.direct_ptr[i] = -1;
@@ -1606,8 +1327,6 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 	return 0;
 }
 
-
-
 // For this project, you don't need to fill these functions
 // But DO NOT DELETE THEM!
 static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {return 0;}
@@ -1639,86 +1358,6 @@ static struct fuse_operations tfs_ope = {
 	.release	= tfs_release
 };
 
-int get_node_by_pathtest(const char *path, uint16_t ino, struct inode *inode) {
-	// Get next name in path
-	// Extract <next> from <next>/<nextNext>/<nextNextNext>/...
-	printf("in get_node-by_path, will attempt to parse \"%s\"\n", path);
-	char nextName[208], nextPath[208];
-	int i = 0, nameIndex = 0, nextIndex = 0;
-
-	// Copy chars into nextName until next delimiter or end of path
-	if(path[0] == '/'){
-		i++;
-	}
-	for(nameIndex = 0; i < 208 && path[i] != '\0' && path[i] != '/'; i++, nameIndex++){
-		nextName[nameIndex] = path[i];
-	}
-	// End string with null terminator
-	nextName[nameIndex] = '\0';
-
-	// Extract <nextNext>/<nextNextNext>/... from /<next>/<nextNext>/<nextNextNext>/...
-	if(path[i] == '/'){
-		i++;
-	}
-	for(nextIndex = 0; i < 208 && path[i] != '\0'; i++, nextIndex++){
-		nextPath[nextIndex] = path[i];
-	}
-	// End string with null terminator
-	nextPath[nextIndex] = '\0';
-	// printf("in getnodebypath.\n");
-	// printf("path: %s.\n", path);
-	printf("nextname: \"%s\"\n", nextName);
-	printf("nextpath: \"%s\"\n", nextPath);
-	// Make sure path is not an empty string, should never happen
-	if(i == 0){
-		//printf("path is empty.\n");
-		inode = NULL;
-		printf("couldn't find.\n");
-		return -1;
-	}
-
-	// Case where only "/" is sent in as path - should just return root directory's inode
-	if(i == 1){
-		// printf("only /\n");
-		// return 1;
-		printf("root node\n");
-		return readi(0, inode);
-	}
-
-	// Find currPath's dir inside given ino's dir
-	// struct dirent *nextDirent = malloc(sizeof(struct dirent));
-	// int ret = dir_find(ino, nextName, i, nextDirent);
-
-	// // Couldn't find subdirectory/subfile name within directory number ino
-	// if(ret == -1 || nextDirent == NULL || nextDirent ->valid < 0){
-	// 	printf("couldn't find.\n");
-	// 	inode = NULL;
-	// 	return -1;
-	// }
-	
-	// // Base case: after extracting currPath's inode, check if basename(path) == nextName
-	// // Not the best since a path of "test/good/bad/test/good" would return (directory) good's inode
-	// // Later: maybe it wouldn't since the path still has "/bad/test/good" appended to good
-	// if(strcmp(basename((char*)path), nextName) == 0){
-	// 	printf("found match: inode %d\n", nextDirent->ino);
-	// 	int dirInodeNumber = nextDirent->ino;
-	// 	free(nextDirent);
-	// 	// readi returns -1 on fail, 1 on success
-	// 	int ret_val = readi(dirInodeNumber, inode);
-	// 	printf("read in: %d, ret_val is %d\n", inode->ino, ret_val);
-	// 	return ret_val;
-	// }
-
-	// Case where nextPath is empty - reached end of path
-	if(nextIndex == 0){
-		printf("end of path.\n");
-		return -1;
-	}
-
-	// Recurse on next segment of the path
-	return get_node_by_pathtest(nextPath, 0, inode);
-}
-
 int main(int argc, char *argv[]) {
 	int fuse_stat;
 
@@ -1728,7 +1367,4 @@ int main(int argc, char *argv[]) {
 	fuse_stat = fuse_main(argc, argv, &tfs_ope, NULL);
 	
 	return fuse_stat;
-	// struct inode* inode = malloc(sizeof(struct inode));
-	// get_node_by_pathtest("../test", 0, inode);
-	// get_node_by_pathtest("../5", 0, inode);
 }
